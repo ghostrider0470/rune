@@ -13874,14 +13874,12 @@ async fn doctor_run_surfaces_readiness_slos_and_pending_evidence_status() {
     assert!(blockers.iter().any(|blocker| {
         blocker["category"] == "operational"
             && blocker["status"] == "blocked"
-            && blocker["issue"] == "#905"
     }));
     assert!(blockers.iter().any(|blocker| {
-        blocker["category"] == "product-surface" && blocker["issue"] == "#901, #902"
+        blocker["category"] == "product-surface"
     }));
     assert!(blockers.iter().any(|blocker| {
         blocker["category"] == "runtime-resilience"
-            && blocker["issue"] == "#894"
             && blocker["detail"]
                 .as_str()
                 .unwrap()
@@ -13943,15 +13941,15 @@ async fn session_status_unresolved_reuses_replacement_readiness_blockers() {
 
     assert!(unresolved.iter().any(|item| {
         item.as_str()
-            == Some("replacement readiness [operational:#905]: readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces")
+            == Some("replacement readiness [operational]: readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces")
     }));
     assert!(unresolved.iter().any(|item| {
         item.as_str()
-            == Some("replacement readiness [product-surface:#901, #902]: operator-facing replacement-readiness gaps still need to be surfaced consistently across the remaining parity surfaces so Rune tells one honest replacement story everywhere")
+            == Some("replacement readiness [product-surface]: operator-facing replacement-readiness gaps still need to be surfaced consistently across the remaining parity surfaces so Rune tells one honest replacement story everywhere")
     }));
     assert!(unresolved.iter().any(|item| {
         item.as_str()
-            == Some("replacement readiness [runtime-resilience:#894]: circuit breakers are already shipped, but the broader runtime resilience proof for honest replacement claims still needs tracked operational evidence and closure")
+            == Some("replacement readiness [runtime-resilience]: circuit breakers are already shipped, but the broader runtime resilience proof for honest replacement claims still needs tracked operational evidence and closure")
     }));
 }
 

@@ -7700,19 +7700,19 @@ fn canonical_replacement_readiness_blockers() -> Vec<ReplacementReadinessBlocker
             category: "operational",
             status: "blocked",
             detail: "readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces".to_string(),
-            issue: Some("#905"),
+            issue: None,
         },
         ReplacementReadinessBlocker {
             category: "product-surface",
             status: "blocked",
             detail: "operator-facing replacement-readiness gaps still need to be surfaced consistently across the remaining parity surfaces so Rune tells one honest replacement story everywhere".to_string(),
-            issue: Some("#901, #902"),
+            issue: None,
         },
         ReplacementReadinessBlocker {
             category: "runtime-resilience",
             status: "partial",
             detail: "circuit breakers are already shipped, but the broader runtime resilience proof for honest replacement claims still needs tracked operational evidence and closure".to_string(),
-            issue: Some("#894"),
+            issue: None,
         },
     ]
 }
