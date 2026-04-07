@@ -543,7 +543,7 @@ impl SessionLoop {
                     return Ok(());
                 }
 
-                let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
+                let routing_key = msg.raw_chat_id.clone();
                 let source = msg
                     .raw_chat_id
                     .split([':', '/'])
@@ -784,7 +784,7 @@ impl SessionLoop {
                 Ok(true)
             }
             "/status" => {
-                let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
+                let routing_key = msg.raw_chat_id.clone();
                 let status = self.render_status(&routing_key).await?;
                 self.send_command_reply(msg, &status).await;
                 Ok(true)
@@ -871,7 +871,7 @@ impl SessionLoop {
             };
 
             // Model specified → set it for this session
-            let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
+            let routing_key = msg.raw_chat_id.clone();
             let session = self.find_or_create_session(&routing_key).await?;
             let model_id = resolved.canonical_model_id();
             let metadata = set_selected_model(&session.metadata, &model_id);
@@ -894,7 +894,7 @@ impl SessionLoop {
         msg: &rune_channels::ChannelMessage,
         args: &str,
     ) -> Result<(), RuntimeError> {
-        let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
+        let routing_key = msg.raw_chat_id.clone();
         let session = match self.find_or_create_session(&routing_key).await {
             Ok(session) => session,
             Err(error) => {
@@ -930,7 +930,7 @@ impl SessionLoop {
         &self,
         msg: &rune_channels::ChannelMessage,
     ) -> Result<(), RuntimeError> {
-        let routing_key = format!("{}:{}", msg.raw_chat_id, msg.sender);
+        let routing_key = msg.raw_chat_id.clone();
 
         // Remove from in-memory cache so next message creates a new session
         {
