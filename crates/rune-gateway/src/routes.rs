@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use tracing::info;
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use rune_core::{JobId, SchedulerDeliveryMode, SchedulerRunTrigger, SessionKind};
@@ -4960,17 +4960,46 @@ pub async fn telegram_webhook(
                 GatewayError::BadRequest("telegram message missing chat.id".to_string())
             })?;
 
-        let sender = message
+        let sender_id = message
+            .get("from")
+            .and_then(|from| from.get("id"))
+            .and_then(|id| {
+                id.as_i64()
+                    .map(|value| value.to_string())
+                    .or_else(|| id.as_u64().map(|value| value.to_string()))
+                    .or_else(|| id.as_str().map(str::to_string))
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+        let sender_label = message
             .get("from")
             .and_then(|from| {
                 from.get("username")
                     .and_then(|v| v.as_str())
                     .map(str::to_string)
-                    .or_else(|| from.get("id").map(|v| v.to_string()))
+                    .or_else(|| {
+                        let first = from.get("first_name").and_then(|v| v.as_str());
+                        let last = from.get("last_name").and_then(|v| v.as_str());
+                        match (first, last) {
+                            (Some(first), Some(last)) if !last.is_empty() => {
+                                Some(format!("{first} {last}"))
+                            }
+                            (Some(first), _) => Some(first.to_string()),
+                            _ => None,
+                        }
+                    })
             })
-            .unwrap_or_else(|| "unknown".to_string());
-
-        let routing_key = format!("{}:{}", chat_id, sender);
+            .unwrap_or_else(|| sender_id.clone());
+        let chat_type = message
+            .get("chat")
+            .and_then(|chat| chat.get("type"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown");
+        let sender_is_bot = message
+            .get("from")
+            .and_then(|from| from.get("is_bot"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        let routing_key = format!("telegram:{chat_id}:{sender_id}");
 
         let session = if let Some(existing) = state
             .session_repo
@@ -5027,7 +5056,17 @@ pub async fn telegram_webhook(
             }
         }
 
+        if sender_is_bot {
+            warn!(chat_id, sender_id = %sender_id, sender_label = %sender_label, "ignoring telegram bot-originated message");
+            return Ok(StatusCode::OK);
+        }
+
         if !content.trim().is_empty() {
+            let content = format!(
+                "[telegram chat_type={chat_type} chat_id={chat_id} sender_id={sender_id} sender=\"{}\"]\n{}",
+                sender_label.replace('"', "'"),
+                content
+            );
             let (turn_row, usage) = state
                 .turn_executor
                 .execute(session.id, &content, None)
@@ -9082,6 +9121,115 @@ mod tests {
         assert_eq!(response.alerts[0].peer_id, "peer-a");
         assert_eq!(response.alerts[1].severity, "warning");
         assert_eq!(response.alerts[1].peer_id, "peer-b");
+    }
+    #[test]
+    fn telegram_identity_parsing_prefers_stable_sender_id_and_label() {
+        let message = serde_json::json!({
+            "chat": {"id": -10012345, "type": "supergroup"},
+            "from": {
+                "id": 987654321,
+                "username": "hamza",
+                "first_name": "Hamza",
+                "last_name": "Abdagic",
+                "is_bot": false
+            }
+        });
+
+        let sender_id = message
+            .get("from")
+            .and_then(|from| from.get("id"))
+            .and_then(|id| {
+                id.as_i64()
+                    .map(|value| value.to_string())
+                    .or_else(|| id.as_u64().map(|value| value.to_string()))
+                    .or_else(|| id.as_str().map(str::to_string))
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+        let sender_label = message
+            .get("from")
+            .and_then(|from| {
+                from.get("username")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        let first = from.get("first_name").and_then(|v| v.as_str());
+                        let last = from.get("last_name").and_then(|v| v.as_str());
+                        match (first, last) {
+                            (Some(first), Some(last)) if !last.is_empty() => {
+                                Some(format!("{first} {last}"))
+                            }
+                            (Some(first), _) => Some(first.to_string()),
+                            _ => None,
+                        }
+                    })
+            })
+            .unwrap_or_else(|| sender_id.clone());
+        let chat_type = message
+            .get("chat")
+            .and_then(|chat| chat.get("type"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown");
+        let routing_key = format!("telegram:{}:{}", -10012345, sender_id);
+        let content = format!(
+            "[telegram chat_type={chat_type} chat_id={} sender_id={} sender=\"{}\"]\n{}",
+            -10012345,
+            sender_id,
+            sender_label.replace('"', "'"),
+            "hello"
+        );
+
+        assert_eq!(sender_id, "987654321");
+        assert_eq!(sender_label, "hamza");
+        assert_eq!(routing_key, "telegram:-10012345:987654321");
+        assert!(content.starts_with("[telegram chat_type=supergroup"));
+        assert!(content.contains("sender_id=987654321"));
+        assert!(content.contains("sender=\"hamza\""));
+    }
+
+    #[test]
+    fn telegram_identity_parsing_falls_back_to_name_when_username_missing() {
+        let message = serde_json::json!({
+            "chat": {"id": 42, "type": "private"},
+            "from": {
+                "id": "user-42",
+                "first_name": "Hamza",
+                "last_name": "A.",
+                "is_bot": false
+            }
+        });
+
+        let sender_id = message
+            .get("from")
+            .and_then(|from| from.get("id"))
+            .and_then(|id| {
+                id.as_i64()
+                    .map(|value| value.to_string())
+                    .or_else(|| id.as_u64().map(|value| value.to_string()))
+                    .or_else(|| id.as_str().map(str::to_string))
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+        let sender_label = message
+            .get("from")
+            .and_then(|from| {
+                from.get("username")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        let first = from.get("first_name").and_then(|v| v.as_str());
+                        let last = from.get("last_name").and_then(|v| v.as_str());
+                        match (first, last) {
+                            (Some(first), Some(last)) if !last.is_empty() => {
+                                Some(format!("{first} {last}"))
+                            }
+                            (Some(first), _) => Some(first.to_string()),
+                            _ => None,
+                        }
+                    })
+            })
+            .unwrap_or_else(|| sender_id.clone());
+
+        assert_eq!(sender_id, "user-42");
+        assert_eq!(sender_label, "Hamza A.");
     }
 }
 
