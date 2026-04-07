@@ -4852,17 +4852,14 @@ pub async fn telegram_webhook(
     Path(token): Path<String>,
     Json(update): Json<serde_json::Value>,
 ) -> Result<StatusCode, GatewayError> {
-    // Validate the webhook token matches the configured bot token
-    let expected_token = state
-        .config
-        .read()
-        .await
-        .channels
-        .telegram_token
-        .clone()
-        .unwrap_or_default();
+    // Validate the webhook token matches the configured bot token and that the
+    // telegram channel is explicitly enabled.
+    let config = state.config.read().await;
+    let telegram_enabled = config.channels.enabled.iter().any(|channel| channel == "telegram");
+    let expected_token = config.channels.telegram_token.clone().unwrap_or_default();
+    drop(config);
 
-    if token != expected_token {
+    if !telegram_enabled || token != expected_token {
         return Err(GatewayError::Unauthorized);
     }
 
