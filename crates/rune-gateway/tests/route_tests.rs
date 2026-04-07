@@ -1387,6 +1387,13 @@ fn build_test_app(auth_token: Option<String>) -> axum::Router {
     build_test_app_parts(AppConfig::default(), auth_token).0
 }
 
+fn build_test_app_with_log_store(
+    auth_token: Option<String>,
+    log_store: LogStore,
+) -> axum::Router {
+    build_test_app_parts_with_log_store(AppConfig::default(), auth_token, log_store).0
+}
+
 fn build_test_app_with_config(config: AppConfig, auth_token: Option<String>) -> axum::Router {
     build_test_app_parts(config, auth_token).0
 }
@@ -1548,7 +1555,48 @@ fn build_test_app_parts_with_ms365_services(
     )
 }
 
+fn build_test_app_parts_with_log_store(
+    config: AppConfig,
+    auth_token: Option<String>,
+    log_store: LogStore,
+) -> (axum::Router, Arc<MemDeviceRepo>) {
+    build_test_app_parts_with_ms365_services_and_session_repo_and_log_store(
+        config,
+        auth_token,
+        Arc::new(MemSessionRepo::new()),
+        test_ms365_calendar_service(),
+        test_ms365_planner_service(),
+        test_ms365_todo_service(),
+        test_ms365_files_service(),
+        test_ms365_users_service(),
+        log_store,
+    )
+}
+
 fn build_test_app_parts_with_ms365_services_and_session_repo(
+    config: AppConfig,
+    auth_token: Option<String>,
+    session_repo: Arc<MemSessionRepo>,
+    ms365_calendar_service: Arc<dyn Ms365CalendarService>,
+    ms365_planner_service: Arc<dyn Ms365PlannerService>,
+    ms365_todo_service: Arc<dyn Ms365TodoService>,
+    ms365_files_service: Arc<dyn Ms365FilesService>,
+    ms365_users_service: Arc<dyn Ms365UsersService>,
+) -> (axum::Router, Arc<MemDeviceRepo>) {
+    build_test_app_parts_with_ms365_services_and_session_repo_and_log_store(
+        config,
+        auth_token,
+        session_repo,
+        ms365_calendar_service,
+        ms365_planner_service,
+        ms365_todo_service,
+        ms365_files_service,
+        ms365_users_service,
+        LogStore::new(1000),
+    )
+}
+
+fn build_test_app_parts_with_ms365_services_and_session_repo_and_log_store(
     mut config: AppConfig,
     auth_token: Option<String>,
     session_repo: Arc<MemSessionRepo>,
@@ -1557,6 +1605,7 @@ fn build_test_app_parts_with_ms365_services_and_session_repo(
     ms365_todo_service: Arc<dyn Ms365TodoService>,
     ms365_files_service: Arc<dyn Ms365FilesService>,
     ms365_users_service: Arc<dyn Ms365UsersService>,
+    log_store: LogStore,
 ) -> (axum::Router, Arc<MemDeviceRepo>) {
     let turn_repo = Arc::new(MemTurnRepo::new());
     let transcript_repo = Arc::new(MemTranscriptRepo::new());
@@ -1659,7 +1708,7 @@ fn build_test_app_parts_with_ms365_services_and_session_repo(
         tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
             as Arc<dyn ToolExecutionRepo>,
         process_manager: ProcessManager::new(),
-        log_store: LogStore::new(1000),
+        log_store,
         capabilities,
         device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
         device_registry,
@@ -16763,4 +16812,149 @@ async fn get_session_tree_summarizes_descendant_team_rollup() {
         json["audit"]["last_descendant_result_excerpt"],
         "Grandchild delivered the final delegated audit summary for the root team view."
     );
+}
+
+#[tokio::test]
+async fn logs_websocket_replays_buffered_snapshot_before_live_entries() {
+    use futures_util::StreamExt;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+
+    let log_store = LogStore::new(16);
+    log_store
+        .push(rune_gateway::logging::LogEntry {
+            timestamp: Utc::now().to_rfc3339(),
+            level: "INFO".to_string(),
+            target: "gateway.server".to_string(),
+            message: "gateway ready".to_string(),
+            fields: None,
+        })
+        .await;
+    let app = build_test_app_with_log_store(Some("test-token".to_string()), log_store.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service()).await.unwrap();
+    });
+
+    let url = format!("ws://{}/ws/logs?api_key=test-token", addr);
+
+    let live_store = log_store.clone();
+    let live_task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        live_store
+            .push(rune_gateway::logging::LogEntry {
+                timestamp: Utc::now().to_rfc3339(),
+                level: "INFO".to_string(),
+                target: "gateway.server".to_string(),
+                message: "live log after connect".to_string(),
+                fields: None,
+            })
+            .await;
+    });
+    let (mut ws, response) = connect_async(url).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    let first = tokio::time::timeout(Duration::from_secs(2), ws.next())
+        .await
+        .expect("first log timeout")
+        .expect("socket closed")
+        .expect("websocket frame");
+
+    let second = tokio::time::timeout(Duration::from_secs(2), ws.next())
+        .await
+        .expect("second log timeout")
+        .expect("socket closed")
+        .expect("websocket frame");
+
+    let decode = |message| match message {
+        tokio_tungstenite::tungstenite::Message::Text(text) => {
+            serde_json::from_str::<rune_gateway::logging::LogEntry>(&text).unwrap()
+        }
+        other => panic!("expected text frame, got {other:?}"),
+    };
+
+    let first = decode(first);
+    let second = decode(second);
+
+    assert_eq!(first.message, "gateway ready");
+    assert_eq!(second.message, "live log after connect");
+
+    live_task.await.unwrap();
+    drop(ws);
+    server.abort();
+}
+
+#[tokio::test]
+async fn logs_websocket_source_filter_applies_to_snapshot_and_live_entries() {
+    use futures_util::StreamExt;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+
+    let log_store = LogStore::new(16);
+    log_store
+        .push(rune_gateway::logging::LogEntry {
+            timestamp: Utc::now().to_rfc3339(),
+            level: "INFO".to_string(),
+            target: "runtime.scheduler".to_string(),
+            message: "runtime replay".to_string(),
+            fields: None,
+        })
+        .await;
+    log_store
+        .push(rune_gateway::logging::LogEntry {
+            timestamp: Utc::now().to_rfc3339(),
+            level: "INFO".to_string(),
+            target: "gateway.server".to_string(),
+            message: "gateway replay".to_string(),
+            fields: None,
+        })
+        .await;
+    let app = build_test_app_with_log_store(Some("test-token".to_string()), log_store.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app.into_make_service()).await.unwrap();
+    });
+
+    let url = format!("ws://{}/ws/logs?api_key=test-token&source=runtime", addr);
+
+    let live_store = log_store.clone();
+    let live_task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        live_store
+            .push(rune_gateway::logging::LogEntry {
+                timestamp: Utc::now().to_rfc3339(),
+                level: "INFO".to_string(),
+                target: "gateway.server".to_string(),
+                message: "gateway live".to_string(),
+                fields: None,
+            })
+            .await;
+    });
+    let (mut ws, response) = connect_async(url).await.unwrap();
+    assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    let first = tokio::time::timeout(Duration::from_secs(2), ws.next())
+        .await
+        .expect("filtered snapshot timeout")
+        .expect("socket closed")
+        .expect("websocket frame");
+
+    let decoded = match first {
+        tokio_tungstenite::tungstenite::Message::Text(text) => {
+            serde_json::from_str::<rune_gateway::logging::LogEntry>(&text).unwrap()
+        }
+        other => panic!("expected text frame, got {other:?}"),
+    };
+
+    assert_eq!(decoded.target, "runtime.scheduler");
+    assert_eq!(decoded.message, "runtime replay");
+
+    let no_extra = tokio::time::timeout(Duration::from_millis(250), ws.next()).await;
+    assert!(no_extra.is_err(), "unexpected non-matching live log delivered");
+
+    live_task.await.unwrap();
+    drop(ws);
+    server.abort();
 }
