@@ -275,6 +275,52 @@ Recommended rollout sequence:
 3. inspect a delegation plan from the sender node
 4. only then enable real delegated work between instances
 
+### Delegated task protocol at a glance
+
+Use this contract when one Rune instance intends to hand work to another:
+
+1. **Discover peers** via `GET /api/v1/instance/health` or `rune gateway instance-health`.
+2. **Preflight routing** via `GET /api/v1/instance/delegation-plan` using either:
+   - `strategy=least_busy` for automatic healthy-peer selection
+   - `strategy=named&peer_id=<peer>` for explicit targeting
+3. **Validate compatibility** in the returned `capability_match` block before dispatching.
+4. **Reserve conflicts upfront** for coding tasks:
+   - branch names must be reserved before execution
+   - file locks must be acquired before touching shared files
+5. **Submit work** to `POST /api/v1/instance/delegations` with at least the task payload.
+6. **Poll lifecycle** at `GET /api/v1/instance/delegations/{task_id}` until a terminal state is reached.
+7. **Treat only terminal states as closure**: `completed`, `failed`, or `timeout`.
+
+### Delegation-plan response fields operators should care about
+
+The delegation plan is intentionally verbose so senders do not guess about safety-critical details.
+
+| Field | Meaning | Why it matters |
+|---|---|---|
+| `strategy` | Chosen routing strategy (`least_busy` or `named`) | Confirms whether peer selection was automatic or pinned |
+| `selected_peer` | The peer Rune intends to target | Shows who will actually receive the work |
+| `candidates` | Evaluated peers | Makes rejected/alternate routing options inspectable |
+| `capability_match` | Compatibility verdict, overlap, and missing roles/projects | Prevents delegation to peers that cannot safely execute the task |
+| `sender` / `receiver` | Identity plus health/submit/result URLs | Gives operators the exact transport contract |
+| `routing` | Peer-count and routing rationale | Explains why that peer won selection |
+| `branch_reservation` | Branch collision-prevention contract | Required for delegated coding work |
+| `file_locks` | Shared-file coordination contract | Prevents concurrent edits on the same files |
+| `task_status` | Lifecycle states and timeout/failure semantics | Defines what the sender should expect while polling |
+| `result` | Result-envelope field names | Keeps sender/receiver parsing aligned |
+
+### Human-readable CLI output semantics
+
+`rune gateway delegation-plan` renders the same protocol in a concise operator view:
+- selected peer and candidate count
+- protocol version and accepted submission modes
+- lifecycle states and timeout handling
+- compatibility verdict and model overlap
+- sender/receiver URLs
+- branch reservation and file-lock expectations
+- result-envelope field mapping
+
+This is the intended operator-facing review surface before enabling real cross-instance task handoff.
+
 ## Further detail still missing
 
 Deeper follow-up documentation is still useful for:
