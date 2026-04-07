@@ -1310,11 +1310,10 @@ The project should provide enough operator-facing documentation and/or commands 
 - what post-restore checks to run (`doctor`, health/status, scheduler state sanity)
 - which degraded-recovery cases are expected (for example, provider-managed state, live process handles, or in-flight work)
 
-### 15.4.5 Target CLI workflow contract (`rune backup`, not yet shipped)
+### 15.4.5 CLI workflow contract (`rune backup`)
 
-The currently shipped operator-facing interface is the documented workflow in deployment/operator docs plus filesystem- and database-native tooling.
-The `rune backup` command family remains the intended future primary interface for snapshot and recovery workflows.
-When it ships, these commands must implement the behavioral expectations defined in §15.4.1–§15.4.4.
+The shipped operator-facing interface now includes both the documented workflow in deployment/operator docs and the dedicated `rune backup` command family.
+These commands are the primary client-visible backup surface and must continue to satisfy the behavioral expectations defined in §15.4.1–§15.4.4.
 
 #### Planned subcommands
 

@@ -157,16 +157,16 @@ _Generated 2026-03-20 from code audit of both codebases._
 | Feature | OpenClaw | Rune |
 |---------|----------|------|
 | Docker | Yes | Yes |
-| systemd/launchd service | Yes | No (manual) |
+| systemd/launchd service | Yes | Yes (`rune service install`) |
 | Zero-config startup | Yes (--allow-unconfigured) | Yes (Ollama auto-detect) |
 | Config management | JSON | TOML + env overrides |
 | Health checks | Yes | Yes |
 | Doctor diagnostics | Yes (comprehensive) | Yes |
-| Interactive setup wizard | Yes (onboard) | Partial (rune setup + rune onboard) |
-| Auto-update | Yes | No (rune update check only) |
+| Interactive setup wizard | Yes (onboard) | Yes (`rune setup` / `rune onboard` / `rune configure`) |
+| Auto-update | Yes | Partial (`rune update check/apply/status/wizard`) |
 | TLS/HTTPS | Yes | No |
 
-**Critical gap:** TLS, systemd service install, auto-update.
+**Critical gap:** TLS.
 
 ---
 
