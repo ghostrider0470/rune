@@ -105,3 +105,24 @@ Current contract:
 Current blocker mapping:
 - `operational` → readiness evidence still pending direct live queue-delay / stuck-turn / recovery-time publication in status/doctor surfaces
 - `documentation` → parity/operator evidence reconciliation (`#896`)
+
+## Channel trust-boundary truth
+
+Rune now documents channel trust-boundary behavior explicitly rather than implying OpenClaw parity where it does not exist yet.
+
+Current shipped truth by surface:
+- **Telegram** — webhook authenticity can be enforced through the bot secret-token verification path, but Rune does **not** ship a sender allowlist for inbound Telegram users/chats. Any message delivered by Telegram to an enabled bot can enter the session routing path.
+- **Slack** — webhook authenticity is enforced when the local Events API listener is enabled via `slack_signing_secret`, but Rune does **not** ship a sender/user/channel allowlist decision layer for accepted inbound events.
+- **WhatsApp** — webhook verification and app-secret signature validation are enforced when configured, but Rune does **not** ship a sender/phone allowlist decision layer beyond provider authenticity.
+- **Discord / Signal / Teams** — provider credentials and transport setup gate connectivity, but Rune does **not** currently expose an operator-configurable trusted-sender allowlist for inbound acceptance decisions.
+- **Web/operator surfaces** — operator/API authorization is a separate control plane concern and is not equivalent to channel sender allowlisting.
+
+Operator interpretation:
+- Rune currently distinguishes **provider authenticity** from **sender trust policy**.
+- Provider authenticity checks are shipped for relevant webhook surfaces.
+- Sender allowlist parity with OpenClaw is **not shipped** yet and remains an explicit gap, not hidden behavior.
+
+Current inspectability:
+- The parity matrix records this as a gap instead of implying parity.
+- Doctor/readiness documentation now states the divergence plainly so operators can make an informed deployment decision.
+- If sender-level trust boundaries are required for a deployment, treat that as a blocking product gap until issue `#898` lands a real policy surface.
