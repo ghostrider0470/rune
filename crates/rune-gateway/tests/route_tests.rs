@@ -10863,6 +10863,7 @@ async fn get_session_tree_defaults_subagent_lifecycle_when_runtime_metadata_miss
     assert_eq!(child["subagent_runtime_attached"], false);
 }
 
+#[tokio::test]
 async fn create_subagent_session_accepts_delegation_context_and_scratchpad() {
     let app = build_test_app(None);
 
