@@ -147,7 +147,7 @@ _Generated 2026-03-20 from code audit of both codebases._
 | Sandbox (filesystem) | Yes | Yes |
 | Process audit trail | No | Yes |
 | First-use bypass warning | No | Yes |
-| Channel allowlists | Yes | No |
+| Channel allowlists | Yes | Partial — provider/webhook authenticity checks exist where applicable, but no sender/user/chat allowlist policy surface yet (#898) |
 | Role-based access | Basic | No |
 
 **Rune advantage:** Significantly more sophisticated approval system.
