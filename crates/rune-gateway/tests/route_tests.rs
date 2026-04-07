@@ -1926,7 +1926,10 @@ async fn ws_rpc_status_matches_http_status_basics() {
     assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
     assert_eq!(payload["lane_stats"]["starvation_escalation_after"], 3);
     assert_eq!(payload["lane_stats"]["escalated_lane_capacity_weight"], 1);
-    assert_eq!(payload["lane_stats"]["tool_projects"], serde_json::json!({}));
+    assert_eq!(
+        payload["lane_stats"]["tool_projects"],
+        serde_json::json!({})
+    );
 
     drop(main_permit);
 }
@@ -2189,7 +2192,10 @@ async fn status_reports_configured_lane_capacities() {
     assert_eq!(payload["lane_stats"]["cron_queued"], 0);
     assert_eq!(payload["lane_stats"]["heartbeat_queued"], 0);
     assert_eq!(payload["lane_stats"]["tool_queued"], 0);
-    assert_eq!(payload["lane_stats"]["tool_projects"], serde_json::json!({}));
+    assert_eq!(
+        payload["lane_stats"]["tool_projects"],
+        serde_json::json!({})
+    );
 }
 
 #[tokio::test]
@@ -2429,7 +2435,10 @@ async fn status_reports_tool_project_lane_stats() {
     assert_eq!(payload["lane_stats"]["project_tool_capacity"], 1);
     assert_eq!(payload["lane_stats"]["tool_projects"]["alpha"]["active"], 1);
     assert_eq!(payload["lane_stats"]["tool_projects"]["alpha"]["queued"], 1);
-    assert_eq!(payload["lane_stats"]["tool_projects"]["alpha"]["capacity"], 1);
+    assert_eq!(
+        payload["lane_stats"]["tool_projects"]["alpha"]["capacity"],
+        1
+    );
     assert_eq!(payload["lane_stats"]["tool_projects"]["beta"]["active"], 1);
     assert_eq!(payload["lane_stats"]["tool_projects"]["beta"]["queued"], 0);
 
