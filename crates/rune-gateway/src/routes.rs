@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use tracing::info;
 use uuid::Uuid;
 
@@ -21,7 +21,7 @@ use rune_runtime::scheduler::{
     Job, JobPayload, JobRun, JobRunStatus, JobUpdate, Reminder, ReminderStatus, Schedule,
     SessionTarget, compute_initial_next_run,
 };
-use rune_runtime::{LaneStats, Skill, SkillScanSummary};
+use rune_runtime::{LaneStats, ProjectToolStats, Skill, SkillScanSummary};
 use rune_store::models::{SessionRow, TurnRow};
 use rune_tools::memory_tool::MemoryToolExecutor;
 use rune_tools::process_tool::{PersistedProcessInfo, ProcessInfo};
@@ -993,6 +993,8 @@ pub struct StatusPaths {
 
 #[derive(Serialize)]
 pub struct LaneStatsResponse {
+    pub starvation_escalation_after: usize,
+    pub escalated_lane_capacity_weight: usize,
     pub main_active: usize,
     pub main_capacity: usize,
     pub main_queued: usize,
@@ -1012,6 +1014,7 @@ pub struct LaneStatsResponse {
     pub tool_capacity: usize,
     pub tool_queued: usize,
     pub project_tool_capacity: usize,
+    pub tool_projects: BTreeMap<String, ProjectToolStats>,
 }
 
 #[derive(Serialize)]
@@ -4142,6 +4145,8 @@ fn session_to_dashboard_item(row: SessionRow) -> DashboardSessionItem {
 
 fn lane_stats_response(stats: LaneStats) -> LaneStatsResponse {
     LaneStatsResponse {
+        starvation_escalation_after: stats.starvation_escalation_after,
+        escalated_lane_capacity_weight: stats.escalated_lane_capacity_weight,
         main_active: stats.main_active,
         main_capacity: stats.main_capacity,
         main_queued: stats.main_queued,
@@ -4161,6 +4166,7 @@ fn lane_stats_response(stats: LaneStats) -> LaneStatsResponse {
         tool_capacity: stats.tool_capacity,
         tool_queued: stats.tool_queued,
         project_tool_capacity: stats.project_tool_capacity,
+        tool_projects: stats.tool_project_stats,
     }
 }
 
