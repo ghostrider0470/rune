@@ -1008,6 +1008,8 @@ impl RpcDispatcher {
                     "capacity": stats.heartbeat_capacity,
                     "queued": stats.heartbeat_queued,
                 },
+                "starvation_escalation_after": stats.starvation_escalation_after,
+                "escalated_lane_capacity_weight": stats.escalated_lane_capacity_weight,
                 "tools": {
                     "active": stats.tool_active,
                     "available": stats.tool_available,
