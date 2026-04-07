@@ -3140,7 +3140,7 @@ async fn stop_command_registers_abort_for_active_channel_session() {
         rune_config::ModelsConfig::default(),
     );
 
-    let routing_key = "telegram:dm:hamza:hamza";
+    let routing_key = "telegram:dm:hamza";
     let session = session_loop
         .find_or_create_session(routing_key)
         .await
@@ -3201,7 +3201,7 @@ async fn message_handling_persists_channel_source_priority_metadata() {
 
     let session = h
         .session_repo
-        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .find_by_channel_ref("telegram:dm:hamza")
         .await
         .unwrap()
         .unwrap();
@@ -3245,7 +3245,7 @@ async fn repeated_failing_message_sets_backoff_metadata() {
 
     let session = h
         .session_repo
-        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .find_by_channel_ref("telegram:dm:hamza")
         .await
         .unwrap()
         .unwrap();
@@ -3308,7 +3308,7 @@ async fn repeated_failing_message_is_suppressed_when_backoff_active() {
 
     let session = h
         .session_repo
-        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .find_by_channel_ref("telegram:dm:hamza")
         .await
         .unwrap()
         .unwrap();
@@ -3431,7 +3431,7 @@ async fn repeated_failure_metadata_survives_repo_reload_for_operator_inspection(
 
     let session = h
         .session_repo
-        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .find_by_channel_ref("telegram:dm:hamza")
         .await
         .unwrap()
         .unwrap();
@@ -3496,7 +3496,7 @@ async fn repeated_failures_exhaust_retry_budget_and_persist_terminal_metadata() 
 
     let first_session = h
         .session_repo
-        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .find_by_channel_ref("telegram:dm:hamza")
         .await
         .unwrap()
         .unwrap();
@@ -3529,7 +3529,7 @@ async fn repeated_failures_exhaust_retry_budget_and_persist_terminal_metadata() 
 
     let second_session = h
         .session_repo
-        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .find_by_channel_ref("telegram:dm:hamza")
         .await
         .unwrap()
         .unwrap();
@@ -3562,7 +3562,7 @@ async fn repeated_failures_exhaust_retry_budget_and_persist_terminal_metadata() 
 
     let session = h
         .session_repo
-        .find_by_channel_ref("telegram:dm:hamza:hamza")
+        .find_by_channel_ref("telegram:dm:hamza")
         .await
         .unwrap()
         .unwrap();
