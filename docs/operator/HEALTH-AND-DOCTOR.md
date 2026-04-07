@@ -104,6 +104,8 @@ Current contract:
 
 Current blocker mapping:
 - `operational` → readiness evidence still pending direct live queue-delay / stuck-turn / recovery-time publication in status/doctor surfaces
+- `product-surface` → operator-facing readiness wording must stay aligned with canonical docs and shipped surfaces
+- `runtime-resilience` → broader resilience evidence is still tracked as a readiness-proof gate rather than a feature-gap issue
 
 ## Channel trust-boundary truth
 
@@ -124,4 +126,4 @@ Operator interpretation:
 Current inspectability:
 - The parity matrix records this as a gap instead of implying parity.
 - Doctor/readiness documentation now states the divergence plainly so operators can make an informed deployment decision.
-- If sender-level trust boundaries are required for a deployment, treat that as a blocking product gap until issue `#898` lands a real policy surface.
+- If sender-level trust boundaries are required for a deployment, treat that as a blocking product gap as an explicit readiness gap until a real sender-policy surface exists.
