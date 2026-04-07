@@ -127,6 +127,7 @@ pub struct ContextTierUsage {
     pub loaded: bool,
     pub refresh_required: bool,
     pub source: &'static str,
+    pub over_budget: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -429,6 +430,7 @@ impl ContextAssembler {
                     loaded,
                     refresh_required: loaded && spec.staleness_policy.requires_refresh(),
                     source,
+                    over_budget: spec.token_budget > 0 && estimated_tokens > spec.token_budget,
                 }
             })
             .collect::<Vec<_>>();
