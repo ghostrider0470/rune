@@ -12404,6 +12404,38 @@ async fn auth_token_info_route_reports_auth_disabled_and_device_count() {
 }
 
 #[tokio::test]
+async fn telegram_webhook_rejects_requests_when_telegram_channel_is_not_enabled() {
+    let mut config = AppConfig::default();
+    config.channels.telegram_token = Some("bot-token".to_string());
+
+    let app = build_test_app_with_config(config, None);
+    let response = app
+        .oneshot(
+            Request::post("/webhook/telegram/bot-token")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "update_id": 1,
+                        "message": {
+                            "message_id": 1,
+                            "date": 1,
+                            "chat": { "id": 123, "type": "private" },
+                            "text": "hello"
+                        }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = body_json(response).await;
+    assert_eq!(body["code"], "unauthorized");
+}
+
+#[tokio::test]
 async fn channels_routes_report_configured_adapters_and_active_channel_sessions() {
     let mut config = AppConfig::default();
     config.channels.telegram_token = Some("bot-token".to_string());
