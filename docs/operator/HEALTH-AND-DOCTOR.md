@@ -104,7 +104,6 @@ Current contract:
 
 Current blocker mapping:
 - `operational` → readiness evidence still pending direct live queue-delay / stuck-turn / recovery-time publication in status/doctor surfaces
-- `documentation` → parity/operator evidence reconciliation (`#896`)
 
 ## Channel trust-boundary truth
 

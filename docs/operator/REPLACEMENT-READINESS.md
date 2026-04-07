@@ -60,22 +60,6 @@ Practical meaning:
 - deployments that require sender-level trust boundaries must still treat Rune as blocked on this surface
 - documentation must not describe provider authenticity as if it were sender allowlist parity
 
-### 2. Documentation and evidence reconciliation
-
-State: **partially evidenced**
-
-Tracked by: **#896**
-
-Current shipped truth:
-- multiple docs already describe parts of the readiness story accurately
-- before this reconciliation pass, the readiness story was too distributed and easy to read inconsistently
-- this file exists to provide one canonical operator-facing readiness answer and a clean implemented vs evidence-vs-blocker split
-
-Practical meaning:
-- operator questions should point here first
-- parity docs should distinguish shipped capability from readiness proof
-- stale wording must be corrected instead of silently carried forward
-
 ## Current operator guidance
 
 You may say the following today:
@@ -98,7 +82,7 @@ Supporting sources:
 - [`../OPENCLAW-COVERAGE-MAP.md`](../OPENCLAW-COVERAGE-MAP.md) — parity/docs navigation map
 - [`../parity/PARITY-SPEC.md`](../parity/PARITY-SPEC.md) — parity release rules
 - [`../parity/PARITY-INVENTORY.md`](../parity/PARITY-INVENTORY.md) — surface census and evidence discipline
-- GitHub issues `#898` and `#896` — live execution state
+- GitHub issue `#898` — live execution state
 
 ## Decision rule
 
