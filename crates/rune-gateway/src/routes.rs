@@ -2880,6 +2880,10 @@ pub async fn get_session_status(
             "subagent runtime execution remains conservative; durable lifecycle inspection is available but full remote/runtime attachment parity is not complete".to_string(),
         );
     }
+    unresolved.extend(canonical_replacement_readiness_blockers().into_iter().map(|blocker| match blocker.issue {
+        Some(issue) => format!("replacement readiness [{}:{}]: {}", blocker.category, issue, blocker.detail),
+        None => format!("replacement readiness [{}]: {}", blocker.category, blocker.detail),
+    }));
 
     Ok(Json(SessionStatusResponse {
         session_id: row.id.to_string(),
@@ -7681,13 +7685,36 @@ pub struct ReplacementReadinessReport {
     pub blockers: Vec<ReplacementReadinessBlocker>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct ReplacementReadinessBlocker {
     pub category: &'static str,
     pub status: &'static str,
     pub detail: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub issue: Option<&'static str>,
+}
+
+fn canonical_replacement_readiness_blockers() -> Vec<ReplacementReadinessBlocker> {
+    vec![
+        ReplacementReadinessBlocker {
+            category: "operational",
+            status: "blocked",
+            detail: "readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces".to_string(),
+            issue: Some("#905"),
+        },
+        ReplacementReadinessBlocker {
+            category: "product-surface",
+            status: "blocked",
+            detail: "operator-facing replacement-readiness gaps still need to be surfaced consistently across the remaining parity surfaces so Rune tells one honest replacement story everywhere".to_string(),
+            issue: Some("#901, #902"),
+        },
+        ReplacementReadinessBlocker {
+            category: "runtime-resilience",
+            status: "partial",
+            detail: "circuit breakers are already shipped, but the broader runtime resilience proof for honest replacement claims still needs tracked operational evidence and closure".to_string(),
+            issue: Some("#894"),
+        },
+    ]
 }
 
 fn probe_writable(dir: &std::path::Path) -> bool {
@@ -7771,14 +7798,7 @@ fn doctor_readiness_summary() -> String {
 }
 
 fn replacement_readiness_report() -> ReplacementReadinessReport {
-    let blockers = vec![
-        ReplacementReadinessBlocker {
-            category: "operational",
-            status: "blocked",
-            detail: "readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces".to_string(),
-            issue: None,
-        },
-    ];
+    let blockers = canonical_replacement_readiness_blockers();
     ReplacementReadinessReport {
         verdict: "not_ready",
         summary: format!(

@@ -13908,6 +13908,54 @@ async fn doctor_run_surfaces_readiness_slos_and_pending_evidence_status() {
 }
 
 #[tokio::test]
+async fn session_status_unresolved_reuses_replacement_readiness_blockers() {
+    let app = build_test_app(None);
+
+    let response = app.clone()
+        .oneshot(
+            Request::post("/sessions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "prompt": "status alignment smoke test"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let created = body_json(response).await;
+    let session_id = created["id"].as_str().unwrap();
+
+    let status_response = app
+        .oneshot(
+            Request::get(format!("/sessions/{session_id}/status"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(status_response.status(), StatusCode::OK);
+    let status = body_json(status_response).await;
+    let unresolved = status["unresolved"].as_array().unwrap();
+
+    assert!(unresolved.iter().any(|item| {
+        item.as_str()
+            == Some("replacement readiness [operational:#905]: readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces")
+    }));
+    assert!(unresolved.iter().any(|item| {
+        item.as_str()
+            == Some("replacement readiness [product-surface:#901, #902]: operator-facing replacement-readiness gaps still need to be surfaced consistently across the remaining parity surfaces so Rune tells one honest replacement story everywhere")
+    }));
+    assert!(unresolved.iter().any(|item| {
+        item.as_str()
+            == Some("replacement readiness [runtime-resilience:#894]: circuit breakers are already shipped, but the broader runtime resilience proof for honest replacement claims still needs tracked operational evidence and closure")
+    }));
+}
+
+#[tokio::test]
 async fn api_gateway_parity_auth_and_memory_routes_are_registered() {
     let app = build_test_app(None);
 
