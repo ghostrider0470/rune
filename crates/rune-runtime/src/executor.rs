@@ -33,6 +33,7 @@ use crate::hooks::{HookEvent, HookRegistry};
 use crate::lane_queue::{Lane, LaneQueue};
 use crate::mem0::Mem0Engine;
 use crate::memory::MemoryLoader;
+use crate::memory_bank::MemoryBankLoader;
 use crate::session_metadata::selected_model;
 use crate::skill::SkillRegistry;
 use crate::usage::UsageAccumulator;
@@ -983,6 +984,8 @@ impl TurnExecutor {
             .clone()
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."));
+        let memory_bank_loader = MemoryBankLoader::new(&workspace_root);
+        let memory_bank_context = memory_bank_loader.load().await;
         let workspace_context = WorkspaceLoader::new(&workspace_root, session_kind)
             .load()
             .await;
@@ -1083,6 +1086,11 @@ impl TurnExecutor {
                     }
                     extra_system_sections.push(fragment);
                 }
+            }
+
+            let memory_bank_section = memory_bank_context.format_for_prompt();
+            if !memory_bank_section.is_empty() {
+                extra_system_sections.push(memory_bank_section);
             }
 
             let context_report = self.context_assembler.analyze_context_usage(
