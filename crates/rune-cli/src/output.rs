@@ -6262,12 +6262,12 @@ mod tests {
             readiness_summary: Some("targets: interactive_response<= 1500ms, queue_delay<= 250ms, stuck_turn_rate<= 1.0%, recovery_time<= 60s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence".into()),
             replacement_readiness: Some(ReplacementReadinessReport {
                 verdict: "not_ready".into(),
-                summary: "Rune is not yet an honest OpenClaw replacement; 4 blocker categories remain open".into(),
+                summary: "Rune is not yet an honest OpenClaw replacement; 1 blocker category remains open".into(),
                 blockers: vec![ReplacementReadinessBlocker {
-                    category: "runtime-resilience".into(),
+                    category: "operational".into(),
                     status: "blocked".into(),
-                    detail: "trustworthy log replay/backfill surfaces remain an open readiness blocker; provider/tool circuit breakers are already shipped".into(),
-                    issue: Some("#894".into()),
+                    detail: "readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces".into(),
+                    issue: None,
                 }],
             }),
             checks: vec![
@@ -6344,9 +6344,9 @@ mod tests {
         let out = render(&r, OutputFormat::Human);
         assert!(out.contains("Overall: degraded"));
         assert!(out.contains("Readiness: slo_defined_evidence_pending — targets: interactive_response<= 1500ms, queue_delay<= 250ms, stuck_turn_rate<= 1.0%, recovery_time<= 60s; readiness is blocked until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time evidence"));
-        assert!(out.contains("Replacement readiness: not_ready — Rune is not yet an honest OpenClaw replacement; 4 blocker categories remain open"));
+        assert!(out.contains("Replacement readiness: not_ready — Rune is not yet an honest OpenClaw replacement; 1 blocker category remains open"));
         assert!(out.contains("Replacement blockers:"));
-        assert!(out.contains("runtime-resilience: blocked — trustworthy log replay/backfill surfaces remain an open readiness blocker; provider/tool circuit breakers are already shipped [issue: #894]"));
+        assert!(out.contains("operational: blocked — readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces"));
         assert!(out.contains(
             "Topology: deployment=single-process, database=memory, models=local, search=embedded"
         ));
