@@ -336,7 +336,8 @@ impl LaneQueue {
         let priority_headroom = priority_capacity.saturating_sub(priority_active);
         let reserve = self.escalated_lane_capacity_weight.max(1);
         let required_headroom = reserve.min(priority_capacity.max(1));
-        if queue_depth >= self.starvation_escalation_after && priority_headroom >= required_headroom {
+        if queue_depth >= self.starvation_escalation_after && priority_headroom >= required_headroom
+        {
             return Lane::Priority;
         }
 
@@ -840,8 +841,12 @@ mod tests {
         assert_eq!(stats.starvation_escalation_after, 3);
         assert_eq!(stats.escalated_lane_capacity_weight, 1);
 
-        let escalated = tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Subagent)).await;
-        assert!(escalated.is_ok(), "deep subagent backlog should escalate into priority capacity");
+        let escalated =
+            tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Subagent)).await;
+        assert!(
+            escalated.is_ok(),
+            "deep subagent backlog should escalate into priority capacity"
+        );
 
         let escalated = escalated.unwrap();
         assert_eq!(escalated.lane(), Lane::Priority);
@@ -878,8 +883,12 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(25)).await;
 
-        let escalated = tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Cron)).await;
-        assert!(escalated.is_ok(), "deep cron backlog should escalate into priority capacity");
+        let escalated =
+            tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Cron)).await;
+        assert!(
+            escalated.is_ok(),
+            "deep cron backlog should escalate into priority capacity"
+        );
 
         let escalated = escalated.unwrap();
         assert_eq!(escalated.lane(), Lane::Priority);
@@ -917,8 +926,12 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(25)).await;
 
-        let pending = tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Subagent)).await;
-        assert!(pending.is_err(), "escalation should not steal the last busy priority slot");
+        let pending =
+            tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Subagent)).await;
+        assert!(
+            pending.is_err(),
+            "escalation should not steal the last busy priority slot"
+        );
 
         waiter_one.abort();
         waiter_two.abort();
@@ -1028,13 +1041,19 @@ mod tests {
         let _beta = queue.acquire_tool(Some("beta")).await;
 
         let stats = queue.stats();
-        let alpha = stats.tool_project_stats.get("alpha").expect("alpha project stats");
+        let alpha = stats
+            .tool_project_stats
+            .get("alpha")
+            .expect("alpha project stats");
         assert_eq!(alpha.active, 1);
         assert_eq!(alpha.available, 0);
         assert_eq!(alpha.capacity, 1);
         assert_eq!(alpha.queued, 1);
 
-        let beta = stats.tool_project_stats.get("beta").expect("beta project stats");
+        let beta = stats
+            .tool_project_stats
+            .get("beta")
+            .expect("beta project stats");
         assert_eq!(beta.active, 1);
         assert_eq!(beta.available, 0);
         assert_eq!(beta.capacity, 1);

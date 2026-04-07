@@ -112,7 +112,6 @@ impl TurnExecutor {
         Ok(())
     }
 
-
     async fn persist_context_budget_report(
         &self,
         session_id: Uuid,
@@ -599,7 +598,8 @@ impl TurnExecutor {
                 status: SessionStatus::Failed,
                 note: format!("context_budget_guardrail: {message}"),
             };
-            self.append_transcript(session_id, Some(turn.id), &note).await?;
+            self.append_transcript(session_id, Some(turn.id), &note)
+                .await?;
         }
 
         let final_turn = self

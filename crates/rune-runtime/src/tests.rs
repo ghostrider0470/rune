@@ -4020,10 +4020,12 @@ async fn prompt_budget_guardrail_aborts_before_model_call() {
     assert_eq!(transcript[1].kind, "status_note");
     let note = &transcript[1].payload;
     assert_eq!(note["status"], "failed");
-    assert!(note["note"]
-        .as_str()
-        .unwrap_or("")
-        .contains("context_budget_guardrail: prompt budget exceeded before model call"));
+    assert!(
+        note["note"]
+            .as_str()
+            .unwrap_or("")
+            .contains("context_budget_guardrail: prompt budget exceeded before model call")
+    );
 }
 
 #[tokio::test]
@@ -4100,9 +4102,9 @@ async fn prompt_budget_guardrail_forwards_completion_max_tokens() {
     engine.mark_ready(session.id).await.unwrap();
     engine.mark_running(session.id).await.unwrap();
 
-    let model = Arc::new(FakeModelProvider::new(vec![FakeModelProvider::text_response(
-        "Short answer.",
-    )]));
+    let model = Arc::new(FakeModelProvider::new(vec![
+        FakeModelProvider::text_response("Short answer."),
+    ]));
     let model_handle = model.clone();
     let executor = h
         .turn_executor(
