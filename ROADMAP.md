@@ -1,3 +1,18 @@
+# Rune Roadmap — Execution Snapshot
+
+Last updated: 2026-04-07
+
+## Status
+- Legacy roadmap retained below for provenance.
+- Canonical product strategy lives in `rune-plan.md`.
+- Canonical parity-phase sequencing lives in `docs/IMPLEMENTATION-PHASES.md`.
+- GitHub Project 2 is the live execution control plane.
+- Open replacement-readiness epic #893 and child issues #896, #898, #899 are closed.
+- There is no active roadmap lane under #893 now; remaining replacement-truth gates are tracked directly in shipped readiness docs and doctor/status surfaces.
+- Next execution should come from currently open GitHub issues / Project 2 priorities, not from the closed #893 lane.
+
+---
+
 # Rune — Full OpenClaw Parity + Superior Multi-Agent Orchestration & Context Management
 
 > Status: Legacy roadmap/planning artifact retained for provenance during the planning-canonicalization transition.
