@@ -1909,12 +1909,20 @@ async fn ws_rpc_status_matches_http_status_basics() {
     assert!(payload["config_paths"].is_object());
     assert_eq!(payload["lane_stats"]["main_active"], 1);
     assert_eq!(payload["lane_stats"]["main_capacity"], 4);
+    assert_eq!(payload["lane_stats"]["main_queued"], 0);
+    assert_eq!(payload["lane_stats"]["priority_active"], 0);
+    assert_eq!(payload["lane_stats"]["priority_capacity"], 16);
+    assert_eq!(payload["lane_stats"]["priority_queued"], 0);
     assert_eq!(payload["lane_stats"]["subagent_active"], 0);
+    assert_eq!(payload["lane_stats"]["subagent_queued"], 0);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 16);
+    assert_eq!(payload["lane_stats"]["cron_queued"], 0);
     assert_eq!(payload["lane_stats"]["heartbeat_active"], 0);
     assert_eq!(payload["lane_stats"]["heartbeat_capacity"], 1024);
+    assert_eq!(payload["lane_stats"]["heartbeat_queued"], 0);
     assert_eq!(payload["lane_stats"]["tool_active"], 0);
     assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
+    assert_eq!(payload["lane_stats"]["tool_queued"], 0);
     assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
 
     drop(main_permit);
@@ -2164,11 +2172,18 @@ async fn status_reports_configured_lane_capacities() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let payload: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(payload["lane_stats"]["main_capacity"], 6);
+    assert_eq!(payload["lane_stats"]["priority_capacity"], 16);
     assert_eq!(payload["lane_stats"]["subagent_capacity"], 9);
     assert_eq!(payload["lane_stats"]["cron_capacity"], 128);
     assert_eq!(payload["lane_stats"]["heartbeat_capacity"], 1024);
     assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
     assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
+    assert_eq!(payload["lane_stats"]["main_queued"], 0);
+    assert_eq!(payload["lane_stats"]["priority_queued"], 0);
+    assert_eq!(payload["lane_stats"]["subagent_queued"], 0);
+    assert_eq!(payload["lane_stats"]["cron_queued"], 0);
+    assert_eq!(payload["lane_stats"]["heartbeat_queued"], 0);
+    assert_eq!(payload["lane_stats"]["tool_queued"], 0);
 }
 
 #[tokio::test]
