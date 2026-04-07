@@ -56,6 +56,7 @@ fn is_project_tier_file(name: &str) -> bool {
         "AGENTS.md" | "ROADMAP.md" | "agent-orchestration-runbook.md"
     ) || name.starts_with("memory/")
         || name == "MEMORY.md"
+        || name.starts_with(".rune/knowledge/")
 }
 
 /// Loads workspace context files from the workspace root.
@@ -125,6 +126,10 @@ fn default_files_for_session(session_kind: SessionKind) -> Vec<String> {
         files.push("MEMORY.md".into());
         files.push("memory/lessons.md".into());
         files.push("agent-orchestration-runbook.md".into());
+        files.push(".rune/knowledge/ARCHITECTURE.md".into());
+        files.push(".rune/knowledge/DECISIONS.md".into());
+        files.push(".rune/knowledge/CONVENTIONS.md".into());
+        files.push(".rune/knowledge/DEPENDENCIES.md".into());
     }
 
     // Scheduled sessions get MEMORY.md + heartbeat prompt
