@@ -62,6 +62,7 @@ const CRON_CAPACITY: usize = 1024;
 const HEARTBEAT_CAPACITY: usize = 1024;
 const DEFAULT_GLOBAL_TOOL_CAPACITY: usize = 32;
 const DEFAULT_PROJECT_TOOL_CAPACITY: usize = 4;
+const DEFAULT_STARVATION_ESCALATION_AFTER: usize = 3;
 
 // ── Internal: a single lane's semaphore + FIFO waiters ───────────────
 
@@ -156,6 +157,7 @@ pub struct LaneQueue {
     cron: LaneSemaphore,
     heartbeat: LaneSemaphore,
     tool_limits: ToolConcurrencyQueue,
+    starvation_escalation_after: usize,
 }
 
 impl LaneQueue {
@@ -171,6 +173,7 @@ impl LaneQueue {
                 DEFAULT_GLOBAL_TOOL_CAPACITY,
                 DEFAULT_PROJECT_TOOL_CAPACITY,
             ),
+            starvation_escalation_after: DEFAULT_STARVATION_ESCALATION_AFTER,
         }
     }
 
@@ -197,6 +200,7 @@ impl LaneQueue {
                 DEFAULT_GLOBAL_TOOL_CAPACITY,
                 DEFAULT_PROJECT_TOOL_CAPACITY,
             ),
+            starvation_escalation_after: DEFAULT_STARVATION_ESCALATION_AFTER,
         }
     }
 
@@ -236,6 +240,7 @@ impl LaneQueue {
             cron: LaneSemaphore::new(cron),
             heartbeat: LaneSemaphore::new(heartbeat),
             tool_limits: ToolConcurrencyQueue::new(global_tool_capacity, project_tool_capacity),
+            starvation_escalation_after: DEFAULT_STARVATION_ESCALATION_AFTER,
         }
     }
 
@@ -253,13 +258,14 @@ impl LaneQueue {
 
     /// Acquire a permit for the given lane.
     pub async fn acquire(self: &Arc<Self>, lane: Lane) -> LanePermit {
-        let lane_sem = self.lane_semaphore(&lane);
-        debug!(lane = %lane, "acquiring lane permit");
+        let effective_lane = self.effective_lane(lane);
+        let lane_sem = self.lane_semaphore(&effective_lane);
+        debug!(lane = %lane, effective_lane = %effective_lane, "acquiring lane permit");
         let permit = lane_sem.acquire().await;
-        debug!(lane = %lane, "lane permit acquired");
+        debug!(lane = %lane, effective_lane = %effective_lane, "lane permit acquired");
         LanePermit {
             _permit: permit,
-            lane,
+            lane: effective_lane,
             queue: Arc::clone(self),
         }
     }
@@ -279,6 +285,7 @@ impl LaneQueue {
         let tool_project_stats = self.tool_limits.project_stats();
 
         LaneStats {
+            starvation_escalation_after: self.starvation_escalation_after,
             tool_project_stats,
             main_active: self.main.active(),
             main_available: self.main.semaphore.available_permits(),
@@ -306,6 +313,23 @@ impl LaneQueue {
             tool_queued,
             project_tool_capacity,
         }
+    }
+
+    fn effective_lane(&self, requested: Lane) -> Lane {
+        if self.starvation_escalation_after == 0 {
+            return requested;
+        }
+
+        if matches!(requested, Lane::Main | Lane::Priority | Lane::Heartbeat) {
+            return requested;
+        }
+
+        let queue_depth = self.lane_semaphore(&requested).queued();
+        if queue_depth >= self.starvation_escalation_after {
+            return Lane::Priority;
+        }
+
+        requested
     }
 
     fn lane_semaphore(&self, lane: &Lane) -> &LaneSemaphore {
@@ -462,6 +486,7 @@ impl Drop for ToolPermit {
 /// Snapshot of lane utilisation returned by [`LaneQueue::stats`].
 #[derive(Clone, Debug)]
 pub struct LaneStats {
+    pub starvation_escalation_after: usize,
     pub tool_project_stats: BTreeMap<String, ProjectToolStats>,
     pub main_available: usize,
     pub main_active: usize,
@@ -502,7 +527,7 @@ impl fmt::Display for LaneStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "main={}/{} avail={} queued={} priority={}/{} avail={} queued={} subagent={}/{} avail={} queued={} cron={}/{} avail={} queued={} heartbeat={}/{} avail={} queued={} tools={}/{} avail={} queued={} per_project={}",
+            "main={}/{} avail={} queued={} priority={}/{} avail={} queued={} subagent={}/{} avail={} queued={} cron={}/{} avail={} queued={} heartbeat={}/{} avail={} queued={} tools={}/{} avail={} queued={} per_project={} starvation_escalation_after={}",
             self.main_active,
             self.main_capacity,
             self.main_available,
@@ -528,6 +553,7 @@ impl fmt::Display for LaneStats {
             self.tool_available,
             self.tool_queued,
             self.project_tool_capacity,
+            self.starvation_escalation_after,
         )
     }
 }
@@ -770,6 +796,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deep_subagent_queue_escalates_to_priority_lane() {
+        let queue = Arc::new(LaneQueue::with_all_capacities(1, 1, 1, 1, 1));
+        let _subagent = queue.acquire(Lane::Subagent).await;
+
+        let waiter_one = {
+            let queue = Arc::clone(&queue);
+            tokio::spawn(async move {
+                let _permit = queue.acquire(Lane::Subagent).await;
+            })
+        };
+        let waiter_two = {
+            let queue = Arc::clone(&queue);
+            tokio::spawn(async move {
+                let _permit = queue.acquire(Lane::Subagent).await;
+            })
+        };
+        let waiter_three = {
+            let queue = Arc::clone(&queue);
+            tokio::spawn(async move {
+                let _permit = queue.acquire(Lane::Subagent).await;
+            })
+        };
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        let stats = queue.stats();
+        assert_eq!(stats.subagent_queued, 3);
+        assert_eq!(stats.priority_active, 0);
+        assert_eq!(stats.starvation_escalation_after, 3);
+
+        let escalated = tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Subagent)).await;
+        assert!(escalated.is_ok(), "deep subagent backlog should escalate into priority capacity");
+
+        waiter_one.abort();
+        waiter_two.abort();
+        waiter_three.abort();
+    }
+
+    #[tokio::test]
+    async fn deep_cron_queue_escalates_to_priority_lane() {
+        let queue = Arc::new(LaneQueue::with_all_capacities(1, 1, 1, 1, 1));
+        let _cron = queue.acquire(Lane::Cron).await;
+
+        let waiter_one = {
+            let queue = Arc::clone(&queue);
+            tokio::spawn(async move {
+                let _permit = queue.acquire(Lane::Cron).await;
+            })
+        };
+        let waiter_two = {
+            let queue = Arc::clone(&queue);
+            tokio::spawn(async move {
+                let _permit = queue.acquire(Lane::Cron).await;
+            })
+        };
+        let waiter_three = {
+            let queue = Arc::clone(&queue);
+            tokio::spawn(async move {
+                let _permit = queue.acquire(Lane::Cron).await;
+            })
+        };
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+
+        let escalated = tokio::time::timeout(Duration::from_millis(50), queue.acquire(Lane::Cron)).await;
+        assert!(escalated.is_ok(), "deep cron backlog should escalate into priority capacity");
+
+        waiter_one.abort();
+        waiter_two.abort();
+        waiter_three.abort();
+    }
+
+    #[tokio::test]
     async fn tool_limits_are_project_scoped() {
         let queue = Arc::new(LaneQueue::with_limits(1, 1, 1, 8, 1));
 
@@ -935,6 +1034,7 @@ mod tests {
     #[test]
     fn stats_display() {
         let stats = LaneStats {
+            starvation_escalation_after: DEFAULT_STARVATION_ESCALATION_AFTER,
             tool_project_stats: BTreeMap::new(),
             main_active: 2,
             main_available: 2,
@@ -964,7 +1064,7 @@ mod tests {
         };
         assert_eq!(
             stats.to_string(),
-            "main=2/4 avail=2 queued=3 priority=1/16 avail=15 queued=2 subagent=1/8 avail=7 queued=1 cron=0/1024 avail=1024 queued=0 heartbeat=1/1024 avail=1023 queued=4 tools=0/32 avail=32 queued=5 per_project=4"
+            "main=2/4 avail=2 queued=3 priority=1/16 avail=15 queued=2 subagent=1/8 avail=7 queued=1 cron=0/1024 avail=1024 queued=0 heartbeat=1/1024 avail=1023 queued=4 tools=0/32 avail=32 queued=5 per_project=4 starvation_escalation_after=3"
         );
     }
 }
