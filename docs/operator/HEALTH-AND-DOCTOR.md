@@ -88,7 +88,7 @@ Current readiness semantics:
 - doctor surfaces `readiness_status=slo_defined_evidence_pending` until Rune exposes live evidence for queue delay, stuck-turn rate, and recovery-time compliance
 - defined targets without live evidence are **not** treated as ready
 - operators should treat `readiness_summary` as the canonical explanation for why readiness is blocked or satisfied
-- doctor also emits a `replacement_readiness` section with a direct `verdict`, concise `summary`, and explicit blocker categories (`operational`, `product-surface`, `runtime-resilience`, `documentation`) mapped to canonical GitHub issues
+- doctor also emits a `replacement_readiness` section with a direct `verdict`, concise `summary`, and an explicit blocker list that matches the currently shipped readiness truth
 
 This keeps readiness claims honest: the SLO target exists now, but replacement-readiness remains blocked until the runtime publishes those signals.
 
