@@ -1924,6 +1924,9 @@ async fn ws_rpc_status_matches_http_status_basics() {
     assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
     assert_eq!(payload["lane_stats"]["tool_queued"], 0);
     assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
+    assert_eq!(payload["lane_stats"]["starvation_escalation_after"], 3);
+    assert_eq!(payload["lane_stats"]["escalated_lane_capacity_weight"], 1);
+    assert_eq!(payload["lane_stats"]["tool_projects"], serde_json::json!({}));
 
     drop(main_permit);
 }
@@ -2178,12 +2181,15 @@ async fn status_reports_configured_lane_capacities() {
     assert_eq!(payload["lane_stats"]["heartbeat_capacity"], 1024);
     assert_eq!(payload["lane_stats"]["tool_capacity"], 32);
     assert_eq!(payload["lane_stats"]["project_tool_capacity"], 4);
+    assert_eq!(payload["lane_stats"]["starvation_escalation_after"], 3);
+    assert_eq!(payload["lane_stats"]["escalated_lane_capacity_weight"], 1);
     assert_eq!(payload["lane_stats"]["main_queued"], 0);
     assert_eq!(payload["lane_stats"]["priority_queued"], 0);
     assert_eq!(payload["lane_stats"]["subagent_queued"], 0);
     assert_eq!(payload["lane_stats"]["cron_queued"], 0);
     assert_eq!(payload["lane_stats"]["heartbeat_queued"], 0);
     assert_eq!(payload["lane_stats"]["tool_queued"], 0);
+    assert_eq!(payload["lane_stats"]["tool_projects"], serde_json::json!({}));
 }
 
 #[tokio::test]
@@ -2308,6 +2314,130 @@ async fn ws_rpc_runtime_lanes_reports_lane_queue_stats() {
     drop(subagent_permit);
     drop(heartbeat_permit);
     drop(tool_permit);
+}
+
+#[tokio::test]
+async fn status_reports_tool_project_lane_stats() {
+    let session_repo = Arc::new(MemSessionRepo::new());
+    let turn_repo = Arc::new(MemTurnRepo::new());
+    let transcript_repo = Arc::new(MemTranscriptRepo::new());
+    let approval_repo = Arc::new(MemApprovalRepo::new());
+    let model_provider: Arc<dyn ModelProvider> = Arc::new(FakeModelProvider);
+    let scheduler = Arc::new(Scheduler::new());
+    let session_engine = Arc::new(
+        SessionEngine::new(session_repo.clone()).with_transcript_repo(transcript_repo.clone()),
+    );
+    let context_assembler = ContextAssembler::new("You are a test assistant.");
+    let compaction: Arc<dyn CompactionStrategy> = Arc::new(NoOpCompaction);
+    let tool_executor: Arc<dyn ToolExecutor> = Arc::new(FakeToolExecutor);
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let lane_queue = Arc::new(rune_runtime::LaneQueue::with_limits(2, 3, 4, 8, 1));
+    let turn_executor = Arc::new(
+        TurnExecutor::new(
+            session_repo.clone() as Arc<dyn SessionRepo>,
+            turn_repo.clone() as Arc<dyn TurnRepo>,
+            transcript_repo.clone() as Arc<dyn TranscriptRepo>,
+            approval_repo.clone() as Arc<dyn ApprovalRepo>,
+            model_provider.clone(),
+            tool_executor,
+            tool_registry,
+            context_assembler,
+            compaction,
+        )
+        .with_default_model("fake-model")
+        .with_lane_queue(lane_queue.clone()),
+    );
+    let event_tx = test_event_sender().clone();
+    let skill_registry = Arc::new(SkillRegistry::new());
+    let skill_loader = Arc::new(SkillLoader::new(
+        std::env::temp_dir(),
+        skill_registry.clone(),
+    ));
+    let device_repo = Arc::new(MemDeviceRepo::new());
+    let device_registry = Arc::new(DeviceRegistry::new(device_repo.clone()));
+    let (plugin_registry, plugin_loader, hook_registry) = test_plugins();
+
+    let state = AppState {
+        peer_health_alert_cache: rune_gateway::PeerHealthAlertCache::new(),
+        config: Arc::new(RwLock::new(AppConfig::default())),
+        started_at: Arc::new(Instant::now()),
+        session_engine,
+        turn_executor,
+        session_repo: session_repo as Arc<dyn SessionRepo>,
+        transcript_repo: transcript_repo as Arc<dyn TranscriptRepo>,
+        turn_repo: turn_repo as Arc<dyn TurnRepo>,
+        model_provider,
+        scheduler,
+        heartbeat: Arc::new(HeartbeatRunner::new(std::env::temp_dir())),
+        reminder_store: Arc::new(ReminderStore::new()),
+        approval_repo: approval_repo as Arc<dyn ApprovalRepo>,
+        tool_approval_repo: Arc::new(MemToolApprovalPolicyRepo::new())
+            as Arc<dyn ToolApprovalPolicyRepo>,
+        tool_execution_repo: Arc::new(InMemoryToolExecutionRepo::new())
+            as Arc<dyn ToolExecutionRepo>,
+        process_manager: ProcessManager::new(),
+        log_store: LogStore::new(1000),
+        capabilities: test_capabilities(0),
+        device_repo: device_repo.clone() as Arc<dyn DeviceRepo>,
+        device_registry,
+        skill_registry,
+        skill_loader,
+        plugin_registry,
+        plugin_loader,
+        hook_registry,
+        plugin_manager: None,
+        event_tx,
+        webchat_rate_limiter: Arc::new(WebChatRateLimiter::new(Duration::from_secs(10), 4)),
+        tts_engine: None,
+        stt_engine: None,
+        ms365_calendar_service: test_ms365_calendar_service(),
+        ms365_planner_service: test_ms365_planner_service(),
+        ms365_todo_service: test_ms365_todo_service(),
+        ms365_mail_service: test_ms365_mail_service(),
+        ms365_files_service: test_ms365_files_service(),
+        ms365_users_service: test_ms365_users_service(),
+        comms_client: None,
+        token_metrics: TokenMetricsStore::new(),
+    };
+
+    let alpha_permit = lane_queue.acquire_tool(Some("alpha")).await;
+    let alpha_waiter = {
+        let lane_queue = Arc::clone(&lane_queue);
+        tokio::spawn(async move {
+            let _permit = lane_queue.acquire_tool(Some("alpha")).await;
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    let _beta_permit = lane_queue.acquire_tool(Some("beta")).await;
+
+    let app = build_router(state, None);
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(payload["lane_stats"]["tool_active"], 3);
+    assert_eq!(payload["lane_stats"]["tool_capacity"], 8);
+    assert_eq!(payload["lane_stats"]["tool_queued"], 0);
+    assert_eq!(payload["lane_stats"]["project_tool_capacity"], 1);
+    assert_eq!(payload["lane_stats"]["tool_projects"]["alpha"]["active"], 1);
+    assert_eq!(payload["lane_stats"]["tool_projects"]["alpha"]["queued"], 1);
+    assert_eq!(payload["lane_stats"]["tool_projects"]["alpha"]["capacity"], 1);
+    assert_eq!(payload["lane_stats"]["tool_projects"]["beta"]["active"], 1);
+    assert_eq!(payload["lane_stats"]["tool_projects"]["beta"]["queued"], 0);
+
+    drop(alpha_permit);
+    tokio::time::timeout(Duration::from_millis(200), alpha_waiter)
+        .await
+        .expect("same-project waiter should be released")
+        .expect("join should succeed");
 }
 
 #[tokio::test]
