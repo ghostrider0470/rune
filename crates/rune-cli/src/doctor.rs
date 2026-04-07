@@ -1303,12 +1303,6 @@ fn replacement_readiness_report() -> ReplacementReadinessReport {
             detail: "readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces".to_string(),
             issue: None,
         },
-        ReplacementReadinessBlocker {
-            category: "documentation".to_string(),
-            status: "blocked".to_string(),
-            detail: "parity and operator docs still need reconciliation with shipped replacement evidence".to_string(),
-            issue: Some("#896".to_string()),
-        },
     ];
     ReplacementReadinessReport {
         verdict: "not_ready".to_string(),

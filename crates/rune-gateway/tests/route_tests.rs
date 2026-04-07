@@ -13887,11 +13887,6 @@ async fn doctor_run_surfaces_readiness_slos_and_pending_evidence_status() {
                 .unwrap()
                 .contains("circuit breakers are already shipped")
     }));
-    assert!(
-        blockers.iter().any(|blocker| {
-            blocker["category"] == "documentation" && blocker["issue"] == "#896"
-        })
-    );
 
     let checks = body["checks"].as_array().unwrap();
     assert!(checks.iter().any(|check| {
