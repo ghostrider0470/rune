@@ -7724,20 +7724,8 @@ fn replacement_readiness_report() -> ReplacementReadinessReport {
         ReplacementReadinessBlocker {
             category: "operational",
             status: "blocked",
-            detail: "live queue-delay, stuck-turn-rate, and recovery-time readiness evidence is not exposed yet".to_string(),
-            issue: Some("#905"),
-        },
-        ReplacementReadinessBlocker {
-            category: "product-surface",
-            status: "blocked",
-            detail: "turn-budget guardrails are still open readiness blockers; lane starvation prevention shipped separately".to_string(),
-            issue: Some("#901, #902"),
-        },
-        ReplacementReadinessBlocker {
-            category: "runtime-resilience",
-            status: "blocked",
-            detail: "trustworthy log replay/backfill surfaces remain an open readiness blocker; provider/tool circuit breakers are already shipped".to_string(),
-            issue: Some("#894"),
+            detail: "readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces".to_string(),
+            issue: None,
         },
         ReplacementReadinessBlocker {
             category: "documentation",
