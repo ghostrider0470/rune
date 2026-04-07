@@ -103,7 +103,5 @@ Current contract:
 - each blocker includes a category, normalized status, concise detail, and canonical issue reference when the blocker maps to tracked roadmap work
 
 Current blocker mapping:
-- `operational` → missing live readiness evidence (`#905`)
-- `product-surface` → turn-budget guardrails (`#902`)
-- `runtime-resilience` → trustworthy log replay/backfill only (`#894`); provider/tool circuit breakers from `#903` are already shipped and no longer block readiness on their own
+- `operational` → readiness evidence still pending direct live queue-delay / stuck-turn / recovery-time publication in status/doctor surfaces
 - `documentation` → parity/operator evidence reconciliation (`#896`)
