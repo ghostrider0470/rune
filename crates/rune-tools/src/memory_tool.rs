@@ -3,6 +3,7 @@
 //! Memory in Rune is file-oriented: MEMORY.md and memory/*.md files in the workspace.
 //! Search prefers the persisted hybrid backend when one is configured, falling back
 //! to local keyword scanning when persistence or embeddings are unavailable.
+//! Memory Bank document tools operate on the runtime-seeded `.rune/knowledge/` tree.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -379,7 +380,7 @@ impl MemoryToolExecutor {
     }
 
     async fn memory_bank_files(&self) -> Result<Vec<PathBuf>, ToolError> {
-        let root = self.workspace_root.join("memory-bank");
+        let root = self.workspace_root.join(".rune/knowledge");
         if !root.exists() {
             return Ok(Vec::new());
         }
@@ -424,9 +425,9 @@ impl MemoryToolExecutor {
             ));
         }
 
-        let full = self.workspace_root.join("memory-bank").join(rel);
+        let full = self.workspace_root.join(".rune/knowledge").join(rel);
         if let Ok(canonical) = full.canonicalize() {
-            if let Ok(root) = self.workspace_root.join("memory-bank").canonicalize() {
+            if let Ok(root) = self.workspace_root.join(".rune/knowledge").canonicalize() {
                 if !canonical.starts_with(&root) {
                     return Err(ToolError::InvalidArgument(
                         "resolved path escapes memory-bank boundary".into(),
@@ -492,12 +493,12 @@ impl MemoryToolExecutor {
 
         if full_path.extension().is_none_or(|ext| ext != "md") {
             return Err(ToolError::InvalidArgument(
-                "memory_bank_get only reads markdown files under memory-bank/".into(),
+                "memory_bank_get only reads markdown files under .rune/knowledge/".into(),
             ));
         }
 
         let content = tokio::fs::read_to_string(&full_path).await.map_err(|e| {
-            ToolError::ExecutionFailed(format!("failed to read memory-bank/{path_str}: {e}"))
+            ToolError::ExecutionFailed(format!("failed to read .rune/knowledge/{path_str}: {e}"))
         })?;
         let from = call
             .arguments
@@ -1138,13 +1139,13 @@ mod tests {
     #[tokio::test]
     async fn memory_bank_list_returns_seeded_documents() {
         let tmp = TempDir::new().unwrap();
-        tokio::fs::create_dir_all(tmp.path().join("memory-bank/adr"))
+        tokio::fs::create_dir_all(tmp.path().join(".rune/knowledge/adr"))
             .await
             .unwrap();
-        tokio::fs::write(tmp.path().join("memory-bank/README.md"), "# Memory Bank")
+        tokio::fs::write(tmp.path().join(".rune/knowledge/README.md"), "# Memory Bank")
             .await
             .unwrap();
-        tokio::fs::write(tmp.path().join("memory-bank/adr/ADR-0001.md"), "# ADR")
+        tokio::fs::write(tmp.path().join(".rune/knowledge/adr/ADR-0001.md"), "# ADR")
             .await
             .unwrap();
 
@@ -1152,18 +1153,18 @@ mod tests {
         let call = make_call("memory_bank_list", serde_json::json!({}));
         let result = exec.execute(call).await.unwrap();
 
-        assert!(result.output.contains("memory-bank/README.md"));
-        assert!(result.output.contains("memory-bank/adr/ADR-0001.md"));
+        assert!(result.output.contains(".rune/knowledge/README.md"));
+        assert!(result.output.contains(".rune/knowledge/adr/ADR-0001.md"));
     }
 
     #[tokio::test]
     async fn memory_bank_get_reads_seeded_document() {
         let tmp = TempDir::new().unwrap();
-        tokio::fs::create_dir_all(tmp.path().join("memory-bank/adr"))
+        tokio::fs::create_dir_all(tmp.path().join(".rune/knowledge/adr"))
             .await
             .unwrap();
         tokio::fs::write(
-            tmp.path().join("memory-bank/adr/ADR-0001.md"),
+            tmp.path().join(".rune/knowledge/adr/ADR-0001.md"),
             "# ADR\n\nDecision line\nSecond line",
         )
         .await
@@ -1182,7 +1183,7 @@ mod tests {
     #[tokio::test]
     async fn memory_bank_get_rejects_path_traversal() {
         let tmp = TempDir::new().unwrap();
-        tokio::fs::create_dir_all(tmp.path().join("memory-bank/adr"))
+        tokio::fs::create_dir_all(tmp.path().join(".rune/knowledge/adr"))
             .await
             .unwrap();
 
