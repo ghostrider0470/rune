@@ -383,11 +383,13 @@ Implementation note (2026-03-13): `completion generate <shell>` now emits real s
 - [x] restart preservation workflow
   - 2026-03-20 docs slice: operator docs now make restart/restore expectations explicit for sessions, memory, scheduler state, approvals/audit trails, and other durable state while calling out that live PTY/process attachment and in-flight work are not promised to resume in place.
 - [ ] update path
-- [ ] doctor/diagnostics
+- [x] doctor/diagnostics
+  - 2026-04-08: `rune doctor`, gateway `/api/doctor/run` + `/api/doctor/results`, WS-RPC `doctor.run` + `doctor.results`, operator doctor/readiness docs, and coverage tests are shipped.
 - [ ] doctor interactive repair flow
 - [ ] doctor non-interactive repair flow
 - [ ] diagnostic bundle / inspectable aggregate export
-- [ ] runtime alive vs RPC reachable vs auth-valid distinction
+- [x] runtime alive vs RPC reachable vs auth-valid distinction
+  - 2026-04-08: `rune gateway probe` distinguishes bare `/health` reachability, protected RPC/status reachability, and auth-valid vs auth-required states in both machine and human output.
 - [ ] health/readiness probes
 
 ---
