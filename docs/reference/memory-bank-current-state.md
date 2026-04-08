@@ -14,22 +14,24 @@ Rune currently exposes two Memory Bank tools in `crates/rune-tools/src/memory_to
 
 Current behavior:
 
-- data source is the workspace `memory-bank/` directory
-- only Markdown files are discoverable/readable
+- `memory_bank_list` and `memory_bank_get` currently operate on the workspace `memory-bank/` directory
+- only Markdown files are discoverable/readable through those two tools
 - `memory_bank_list` lists Markdown documents under `memory-bank/`
 - `memory_bank_get` reads a specific Markdown file under `memory-bank/`
-- path traversal is explicitly rejected
+- path traversal is explicitly rejected for both tools
+- separate runtime prompt injection now also seeds and loads `.rune/knowledge/` via `MemoryBankLoader` in `crates/rune-runtime/src/memory_bank.rs`
+- that `.rune/knowledge/` scaffold currently contains `ARCHITECTURE.md`, `DECISIONS.md`, `CONVENTIONS.md`, and `DEPENDENCIES.md`
 
 ## Not yet implemented from the Phase 25 spec
 
 The Phase 25 specification in `docs/specs/phases-25-27.md` describes a larger future subsystem that is not fully shipped today, including:
 
-- `.rune/knowledge/` as the canonical storage location
+- `.rune/knowledge/` as the canonical storage location for the full operator-facing/tooling-backed subsystem
 - a unified `memory_bank` tool with read/update/search operations
 - persistence via `knowledge_docs` store models and migrations
 - staleness detection/reporting
 - `/onboard` project briefing generation
-- automatic memory-bank context injection from that subsystem
+- automatic memory-bank context injection from that subsystem beyond the currently shipped runtime-side scaffold loader
 
 Treat that Phase 25 document as the target design, not as proof of current parity.
 
@@ -40,6 +42,7 @@ When reasoning about current behavior, use the implementation in:
 - `crates/rune-tools/src/memory_tool.rs`
 - tool registration in `crates/rune-tools/src/stubs.rs`
 - related tests in `crates/rune-tools/src/tests.rs`
+- runtime scaffold loader in `crates/rune-runtime/src/memory_bank.rs`
 
 When planning future work, use the Phase 25 spec as the intended end state.
 
