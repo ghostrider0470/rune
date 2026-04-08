@@ -14,10 +14,10 @@ Rune currently exposes two Memory Bank tools in `crates/rune-tools/src/memory_to
 
 Current behavior:
 
-- `memory_bank_list` and `memory_bank_get` currently operate on the workspace `memory-bank/` directory
+- `memory_bank_list` and `memory_bank_get` currently operate on the workspace `.rune/knowledge/` directory
 - only Markdown files are discoverable/readable through those two tools
-- `memory_bank_list` lists Markdown documents under `memory-bank/`
-- `memory_bank_get` reads a specific Markdown file under `memory-bank/`
+- `memory_bank_list` lists Markdown documents under `.rune/knowledge/`
+- `memory_bank_get` reads a specific Markdown file under `.rune/knowledge/`
 - path traversal is explicitly rejected for both tools
 - separate runtime prompt injection now also seeds and loads `.rune/knowledge/` via `MemoryBankLoader` in `crates/rune-runtime/src/memory_bank.rs`
 - that `.rune/knowledge/` scaffold currently contains `ARCHITECTURE.md`, `DECISIONS.md`, `CONVENTIONS.md`, and `DEPENDENCIES.md`
@@ -26,7 +26,7 @@ Current behavior:
 
 The Phase 25 specification in `docs/specs/phases-25-27.md` describes a larger future subsystem that is not fully shipped today, including:
 
-- `.rune/knowledge/` as the canonical storage location for the full operator-facing/tooling-backed subsystem
+- the currently shipped tools already use `.rune/knowledge/` as their on-disk source; the remaining future work is broader API/search/staleness/onboarding support
 - a unified `memory_bank` tool with read/update/search operations
 - persistence via `knowledge_docs` store models and migrations
 - staleness detection/reporting
