@@ -100,7 +100,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | Agent Modes | ⚠️ 2026-03-29 | Project orchestrator routing/registry, persisted orchestrator state, merge queue, and delegated subagent context handoff are shipped; named specialist modes and mode APIs still need follow-up |
 | Git Worktree Isolation | ⚠️ 2026-03-29 | Orchestrator state already tracks branch/worktree paths and merge queue metadata, but automated worktree lifecycle management and executor/tool scoping are still missing |
 | Context Compression | ⚠️ 2026-03-29 | Context tier budgeting, compaction diagnostics, checkpoint metadata, and delegated context handoff for subagents are shipped; transcript summarization/checkpoint persistence still need follow-up |
-| Memory Bank | ❌ Missing | No architectural decision records or project knowledge base — beyond OpenClaw |
+| Memory Bank | ⚠️ 2026-04-08 | `.rune/knowledge/` scaffold + prompt injection are shipped via `MemoryBankLoader`; full Phase 25 API/tooling, staleness checks, and onboarding briefing remain follow-up work |
 | Extended Channels | ❌ Missing | No LINE/Mattermost/Matrix/Feishu/iMessage — OpenClaw breadth |
 | Calendar/Email | ✅ 2026-03-26 | Microsoft 365 calendar, mail, files, users, Planner, and To-Do routes/services landed in gateway with auth and integration coverage |
 
