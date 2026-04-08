@@ -16,6 +16,7 @@ use rune_tools::{ToolCall, ToolExecutor};
 use crate::a2ui::{A2uiActionParams, A2uiEvent, A2uiFormSubmitParams, broadcast_a2ui_event};
 use crate::events::{RuntimeEvent, TurnEvent, UsageSummary, broadcast_runtime_event};
 use crate::routes::{session_next_task_reason, session_resume_hint, session_status_reason};
+use rune_store::models::TurnRow;
 use crate::state::AppState;
 use crate::ws::active_ws_connections;
 
@@ -177,7 +178,8 @@ impl RpcDispatcher {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let items: Vec<Value> = rows
+        let mut items: Vec<Value> = Vec::new();
+        for row in rows
             .into_iter()
             .filter(|row| {
                 channel_filter
@@ -194,20 +196,34 @@ impl RpcDispatcher {
                     .map(|cutoff| row.last_activity_at >= cutoff)
                     .unwrap_or(true)
             })
-            .map(|row| {
-                let mut item = json!({
-                    "id": row.id.to_string(),
-                    "kind": row.kind,
-                    "status": row.status,
-                    "channel": row.channel_ref,
-                    "created_at": row.created_at.to_rfc3339(),
-                });
-                if include_metadata {
-                    item["metadata"] = row.metadata;
-                }
-                item
-            })
-            .collect();
+        {
+            let turns = self
+                .state
+                .turn_repo
+                .list_by_session(row.id)
+                .await
+                .map_err(|e| RpcError::internal(e.to_string()))?;
+            let aggregate = aggregate_turns(&turns);
+            let mut item = json!({
+                "id": row.id.to_string(),
+                "kind": row.kind,
+                "status": row.status,
+                "project_id": metadata_str(&row.metadata, "project_id"),
+                "mode": metadata_str(&row.metadata, "mode"),
+                "requester_session_id": row.requester_session_id.map(|id| id.to_string()),
+                "channel": row.channel_ref,
+                "created_at": row.created_at.to_rfc3339(),
+                "turn_count": aggregate.turn_count,
+                "usage_prompt_tokens": aggregate.usage_prompt_tokens,
+                "usage_completion_tokens": aggregate.usage_completion_tokens,
+                "usage_cached_prompt_tokens": aggregate.usage_cached_prompt_tokens,
+                "latest_model": aggregate.latest_model,
+            });
+            if include_metadata {
+                item["metadata"] = row.metadata;
+            }
+            items.push(item);
+        }
 
         Ok(json!(items))
     }
@@ -1843,6 +1859,42 @@ fn merge_json_object(target: &mut Value, patch: Value) -> Result<(), RpcError> {
         target_obj.insert(key.clone(), value.clone());
     }
     Ok(())
+}
+
+struct SessionTurnAggregate {
+    turn_count: u64,
+    usage_prompt_tokens: u64,
+    usage_completion_tokens: u64,
+    usage_cached_prompt_tokens: u64,
+    latest_model: Option<String>,
+}
+
+fn aggregate_turns(turns: &[TurnRow]) -> SessionTurnAggregate {
+    let turn_count = turns.len() as u64;
+    let usage_prompt_tokens = turns
+        .iter()
+        .map(|t| t.usage_prompt_tokens.unwrap_or(0).max(0) as u64)
+        .sum();
+    let usage_completion_tokens = turns
+        .iter()
+        .map(|t| t.usage_completion_tokens.unwrap_or(0).max(0) as u64)
+        .sum();
+    let usage_cached_prompt_tokens = turns
+        .iter()
+        .map(|t| t.usage_cached_prompt_tokens.unwrap_or(0).max(0) as u64)
+        .sum();
+    let latest_model = turns
+        .iter()
+        .max_by_key(|t| t.started_at)
+        .and_then(|t| t.model_ref.clone());
+
+    SessionTurnAggregate {
+        turn_count,
+        usage_prompt_tokens,
+        usage_completion_tokens,
+        usage_cached_prompt_tokens,
+        latest_model,
+    }
 }
 
 /// Extract a string value from a JSON metadata object.
