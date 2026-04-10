@@ -171,15 +171,18 @@ That means local-first is the default experience, not a throwaway dev-only mode.
 - use [`rune-plan.md`](rune-plan.md) for the canonical product strategy and planning summary
 - use [`docs/OPENCLAW-COVERAGE-MAP.md`](docs/OPENCLAW-COVERAGE-MAP.md) if you need the OpenClaw-surface parity front door
 
-## For contributors
+## Contributing
 
-Start here:
+Rune is now being prepared for open-source contributors. If you want to help, start here:
+- read [`docs/contributor/README.md`](docs/contributor/README.md) for the contributor docs hub
 - use [`docs/contributor/DEVELOPMENT.md`](docs/contributor/DEVELOPMENT.md) for local setup and day-to-day build/run flow
-- use `rune gateway instance-health` via the CLI after configuring `[instance]` to inspect identity/capabilities/load, and `rune gateway delegation-plan --strategy least_busy` to preview the current cross-instance delegation contract
-- use [`docs/contributor/README.md`](docs/contributor/README.md) for the contributor docs hub and related execution references
-- use [`docs/AGENT-ORCHESTRATION.md`](docs/AGENT-ORCHESTRATION.md) for deeper runtime/repo execution context
-- use [`docs/reference/README.md`](docs/reference/README.md), [`docs/reference/ARCHITECTURE.md`](docs/reference/ARCHITECTURE.md), [`docs/reference/CRATE-LAYOUT.md`](docs/reference/CRATE-LAYOUT.md), and [`docs/reference/SUBSYSTEMS.md`](docs/reference/SUBSYSTEMS.md) for technical reference material
+- use [`docs/contributor/TESTING.md`](docs/contributor/TESTING.md) for validation expectations
+- use [`docs/contributor/CONTRIBUTING.md`](docs/contributor/CONTRIBUTING.md) and [`docs/contributor/WORKFLOW.md`](docs/contributor/WORKFLOW.md) for how issues, docs, PRs, and execution flow fit together
+- use `rune gateway instance-health` after configuring `[instance]` to inspect identity/capabilities/load, and `rune gateway delegation-plan --strategy least_busy` to preview the cross-instance delegation contract
+- use [`docs/reference/README.md`](docs/reference/README.md), [`docs/reference/ARCHITECTURE.md`](docs/reference/ARCHITECTURE.md), [`docs/reference/CRATE-LAYOUT.md`](docs/reference/CRATE-LAYOUT.md), and [`docs/reference/SUBSYSTEMS.md`](docs/reference/SUBSYSTEMS.md) for deeper technical reference material
+
+Community scaffolding now lives at [`LICENSE`](LICENSE), [`.github/CODE_OF_CONDUCT.md`](.github/CODE_OF_CONDUCT.md), and [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/).
 
 ## License
 
-Private — [Horizon Tech d.o.o.](https://horizontech.ba)
+MIT — see [`LICENSE`](LICENSE).
