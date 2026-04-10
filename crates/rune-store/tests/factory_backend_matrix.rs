@@ -173,6 +173,7 @@ async fn sqlite_integrated_matrix_row_builds_and_round_trips() {
     config.database.database_url = None;
     config.vector.backend = VectorBackend::Integrated;
     config.vector.lancedb_uri = None;
+    config.database.run_migrations = false;
     config.paths.db_dir = temp.path().join("db-dir");
 
     let result = build_backend_matrix_repos(&config).await;
@@ -226,6 +227,7 @@ async fn postgres_integrated_matrix_row_builds_and_round_trips() {
     config.database.sqlite_path = None;
     config.vector.backend = VectorBackend::Integrated;
     config.vector.lancedb_uri = None;
+    config.database.run_migrations = false;
     config.paths.db_dir = temp.path().join("db-dir");
 
     let result = build_backend_matrix_repos(&config).await;
