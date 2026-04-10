@@ -28,8 +28,8 @@ jobs:
       - name: cargo check
         run: cargo check --workspace --all-targets
 
-      - name: cargo clippy (library)
-        run: cargo clippy --workspace -- -D warnings
+      - name: cargo clippy (all targets/features)
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: cargo doc
         run: cargo doc --workspace --no-deps
@@ -49,5 +49,11 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      - name: cargo test
-        run: cargo test --workspace --all-targets
+      - name: cargo test (workspace crates)
+        run: cargo test --workspace --all-targets --exclude rune-gateway --exclude rune
+
+      - name: cargo test (gateway binary crate)
+        run: cargo test -p rune-gateway-app --all-targets
+
+      - name: cargo test (cli binary crate)
+        run: cargo test -p rune-cli --all-targets
