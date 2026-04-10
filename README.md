@@ -181,7 +181,7 @@ Rune is now being prepared for open-source contributors. If you want to help, st
 - use `rune gateway instance-health` after configuring `[instance]` to inspect identity/capabilities/load, and `rune gateway delegation-plan --strategy least_busy` to preview the cross-instance delegation contract
 - use [`docs/reference/README.md`](docs/reference/README.md), [`docs/reference/ARCHITECTURE.md`](docs/reference/ARCHITECTURE.md), [`docs/reference/CRATE-LAYOUT.md`](docs/reference/CRATE-LAYOUT.md), and [`docs/reference/SUBSYSTEMS.md`](docs/reference/SUBSYSTEMS.md) for deeper technical reference material
 
-Community scaffolding now lives at [`LICENSE`](LICENSE), [`.github/CODE_OF_CONDUCT.md`](.github/CODE_OF_CONDUCT.md), and [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/).
+Community scaffolding now lives at [`LICENSE`](LICENSE), [`SECURITY.md`](SECURITY.md), [`SUPPORT.md`](SUPPORT.md), [`.github/CODE_OF_CONDUCT.md`](.github/CODE_OF_CONDUCT.md), [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/), and [`.github/pull_request_template.md`](.github/pull_request_template.md).
 
 ## License
 
