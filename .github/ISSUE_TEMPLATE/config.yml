@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Contributor docs
+    url: https://github.com/ghostrider0470/rune/tree/main/docs/contributor
+    about: Start here for local setup, testing, and workflow guidance.

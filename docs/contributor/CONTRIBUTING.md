@@ -6,6 +6,10 @@ This is the contributor-facing entry doc for how work should move through Rune.
 
 Contributors should use Rune's docs and issue trail in a way that keeps strategy, execution, and durable decisions separated.
 
+## Open-source baseline
+
+Rune is now being prepared for external contributors. Keep issues scoped, document user-visible changes, and prefer small PRs with clear validation evidence.
+
 ## Start here
 
 - [`DEVELOPMENT.md`](DEVELOPMENT.md)
