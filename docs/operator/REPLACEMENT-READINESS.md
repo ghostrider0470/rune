@@ -6,7 +6,7 @@ This is the canonical operator-facing answer to one question:
 
 Current answer: **not yet**.
 
-As of 2026-04-07, the remaining scoped child issues under epic #893 (#896, #898, #899) are closed. The remaining blocker categories below are evidence/truthfulness gates tracked directly in the readiness surfaces, not open roadmap tickets.
+As of 2026-04-07, the remaining scoped child issues under epic #893 (#896, #898, #899) are closed. The remaining blocker categories below are readiness-proof gates tracked directly in the readiness surfaces rather than open feature-gap tickets.
 
 Rune already ships substantial OpenClaw-facing parity work, but replacement claims must stay narrower than feature existence. A feature can be implemented and still not be sufficient evidence for an honest replacement claim.
 
@@ -84,7 +84,7 @@ Supporting sources:
 - [`../OPENCLAW-COVERAGE-MAP.md`](../OPENCLAW-COVERAGE-MAP.md) — parity/docs navigation map
 - [`../parity/PARITY-SPEC.md`](../parity/PARITY-SPEC.md) — parity release rules
 - [`../parity/PARITY-INVENTORY.md`](../parity/PARITY-INVENTORY.md) — surface census and evidence discipline
-- GitHub issue `#898` — live execution state
+- gateway `replacement_readiness` status/doctor output — live machine-readable blocker state
 
 ## Decision rule
 
