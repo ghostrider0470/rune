@@ -348,7 +348,7 @@ impl RoutedModelProvider {
         &self,
         provider_name: &str,
         model_ref: &str,
-        result: &Result<(), &ModelError>,
+        result: Result<(), &ModelError>,
     ) {
         let mut breakers = self
             .circuit_breakers
@@ -358,7 +358,7 @@ impl RoutedModelProvider {
             .entry(provider_name.to_string())
             .or_insert_with(CircuitBreakerState::new);
 
-        match result {
+        match &result {
             Ok(()) => {
                 state.failures = 0;
                 state.opened_at = None;
@@ -408,7 +408,7 @@ impl RoutedModelProvider {
         self.record_provider_result(
             &resolved.provider.name,
             model_ref,
-            &result.as_ref().map(|_| ()),
+            result.as_ref().map(|_| ()),
         );
         result
     }
@@ -555,7 +555,7 @@ impl RoutedModelProvider {
         self.record_provider_result(
             &resolved.provider.name,
             model_ref,
-            &result.as_ref().map(|_| ()),
+            result.as_ref().map(|_| ()),
         );
         result
     }
