@@ -450,8 +450,9 @@ impl MemoryToolExecutor {
                     "memory_bank path traversal is not allowed".into(),
                 ));
             }
+            let root = self.workspace_root.join(".rune/knowledge");
             files.retain(|path| {
-                path.strip_prefix(self.workspace_root.join("memory-bank"))
+                path.strip_prefix(&root)
                     .ok()
                     .is_some_and(|rel| rel.starts_with(scope))
             });
@@ -748,7 +749,7 @@ pub fn memory_bank_get_tool_definition() -> crate::ToolDefinition {
         parameters: serde_json::json!({
             "type": "object",
             "properties": {
-                "path": { "type": "string", "description": "Workspace-relative path under memory-bank/ to read" },
+                "path": { "type": "string", "description": "Workspace-relative path under .rune/knowledge/ to read" },
                 "from": { "type": "integer", "description": "1-indexed line number to start from" },
                 "lines": { "type": "integer", "description": "Maximum number of lines to return" }
             },
@@ -1155,6 +1156,33 @@ mod tests {
 
         assert!(result.output.contains(".rune/knowledge/README.md"));
         assert!(result.output.contains(".rune/knowledge/adr/ADR-0001.md"));
+    }
+
+    #[tokio::test]
+    async fn memory_bank_list_honors_scoped_subdirectory() {
+        let tmp = TempDir::new().unwrap();
+        tokio::fs::create_dir_all(tmp.path().join(".rune/knowledge/adr"))
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(tmp.path().join(".rune/knowledge/conventions"))
+            .await
+            .unwrap();
+        tokio::fs::write(tmp.path().join(".rune/knowledge/adr/ADR-0001.md"), "# ADR")
+            .await
+            .unwrap();
+        tokio::fs::write(
+            tmp.path().join(".rune/knowledge/conventions/RULES.md"),
+            "# Rules",
+        )
+        .await
+        .unwrap();
+
+        let exec = MemoryToolExecutor::new(tmp.path());
+        let call = make_call("memory_bank_list", serde_json::json!({"path": "adr"}));
+        let result = exec.execute(call).await.unwrap();
+
+        assert!(result.output.contains(".rune/knowledge/adr/ADR-0001.md"));
+        assert!(!result.output.contains(".rune/knowledge/conventions/RULES.md"));
     }
 
     #[tokio::test]
