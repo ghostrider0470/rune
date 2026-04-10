@@ -3,8 +3,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useSkills, useToggleSkill } from "@/hooks/use-operators";
-import { Wrench, FolderOpen } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  useSkills,
+  useToggleSkill,
+  useReloadSkills,
+} from "@/hooks/use-operators";
+import { Wrench, FolderOpen, RefreshCw } from "lucide-react";
 
 export const Route = createFileRoute("/_admin/skills")({
   component: SkillsPage,
@@ -12,16 +17,29 @@ export const Route = createFileRoute("/_admin/skills")({
 
 function SkillsPage() {
   const { data: skills, isLoading } = useSkills();
-
   const toggleSkill = useToggleSkill();
+  const reloadSkills = useReloadSkills();
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Skills</h1>
-        <p className="mt-1 text-muted-foreground">
-          Hot-reloading skills from SKILL.md files
-        </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Skills</h1>
+          <p className="mt-1 text-muted-foreground">
+            Hot-reloading skills from SKILL.md files
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          onClick={() => reloadSkills.mutate()}
+          disabled={reloadSkills.isPending}
+          className="sm:self-start"
+        >
+          <RefreshCw
+            className={`mr-2 h-4 w-4 ${reloadSkills.isPending ? "animate-spin" : ""}`}
+          />
+          Reload skills
+        </Button>
       </div>
 
       {isLoading ? (
@@ -45,13 +63,14 @@ function SkillsPage() {
           {skills.map((skill) => (
             <Card key={skill.name} className="relative">
               <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
+                <div className="flex items-start justify-between gap-3">
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Wrench className="h-4 w-4 shrink-0" />
-                    {skill.name}
+                    <span className="break-all">{skill.name}</span>
                   </CardTitle>
                   <Switch
                     checked={skill.enabled}
+                    disabled={toggleSkill.isPending || reloadSkills.isPending}
                     onCheckedChange={(checked) =>
                       toggleSkill.mutate({
                         name: skill.name,
@@ -62,8 +81,8 @@ function SkillsPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  {skill.description}
+                <p className="min-h-[2.5rem] text-sm text-muted-foreground">
+                  {skill.description || "No description provided."}
                 </p>
 
                 <div className="flex flex-wrap gap-2">
@@ -78,10 +97,8 @@ function SkillsPage() {
                 </div>
 
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <FolderOpen className="h-3 w-3" />
-                  <span className="truncate font-mono">
-                    {skill.source_dir}
-                  </span>
+                  <FolderOpen className="h-3 w-3 shrink-0" />
+                  <span className="truncate font-mono">{skill.source_dir}</span>
                 </div>
               </CardContent>
             </Card>
