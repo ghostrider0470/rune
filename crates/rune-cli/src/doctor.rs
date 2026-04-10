@@ -1303,6 +1303,18 @@ fn replacement_readiness_report() -> ReplacementReadinessReport {
             detail: "readiness evidence is still reported as pending until the gateway publishes live queue-delay, stuck-turn-rate, and recovery-time signals directly in status/doctor surfaces".to_string(),
             issue: None,
         },
+        ReplacementReadinessBlocker {
+            category: "product-surface".to_string(),
+            status: "blocked".to_string(),
+            detail: "operator-facing readiness wording is now aligned to canonical docs, but full replacement claims remain blocked until the remaining readiness-proof surfaces are evidenced".to_string(),
+            issue: None,
+        },
+        ReplacementReadinessBlocker {
+            category: "runtime-resilience".to_string(),
+            status: "partial".to_string(),
+            detail: "circuit breakers are already shipped, but broader runtime-resilience proof for an honest replacement claim still needs tracked operational evidence and closure".to_string(),
+            issue: None,
+        },
     ];
     ReplacementReadinessReport {
         verdict: "not_ready".to_string(),
