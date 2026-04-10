@@ -6285,7 +6285,7 @@ pub async fn list_tools(
     Ok(Json(items))
 }
 
-/// `GET /api/tools/{id}` - get a tool execution by ID (stub).
+/// `GET /api/tools/{id}` - get a persisted tool execution by ID.
 pub async fn get_tool_execution(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -7120,7 +7120,7 @@ pub async fn memory_status(
     }))
 }
 
-/// `GET /api/memory/search` - search memory (stub; backend integration pending).
+/// `GET /api/memory/search` - search local and federated memory sources.
 pub async fn memory_search(
     State(state): State<AppState>,
     Query(query): Query<MemorySearchQuery>,
@@ -8545,7 +8545,7 @@ pub async fn doctor_run(State(state): State<AppState>) -> Result<Json<DoctorRepo
     }))
 }
 
-/// `GET /api/doctor/results` - return the most recent doctor report (stub).
+/// `GET /api/doctor/results` - return the current doctor report snapshot.
 pub async fn doctor_results(
     State(state): State<AppState>,
 ) -> Result<Json<DoctorReport>, GatewayError> {
