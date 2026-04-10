@@ -4575,27 +4575,17 @@ connection: close
                 let mut buf = [0u8; 1024];
                 let read = stream.read(&mut buf).unwrap();
                 let request = String::from_utf8_lossy(&buf[..read]);
-                let response = if request.starts_with("GET /ready ") {
-                    b"HTTP/1.1 404 Not Found
+                let missing = b"HTTP/1.1 404 Not Found
 content-length: 0
 connection: close
 
 "
-                    .as_slice()
-                } else if request.starts_with("GET /health ") {
-                    b"HTTP/1.1 404 Not Found
-content-length: 0
-connection: close
-
-"
-                    .as_slice()
-                } else if request.starts_with("GET /gateway/ready ") {
-                    b"HTTP/1.1 404 Not Found
-content-length: 0
-connection: close
-
-"
-                    .as_slice()
+                .as_slice();
+                let response = if request.starts_with("GET /ready ")
+                    || request.starts_with("GET /health ")
+                    || request.starts_with("GET /gateway/ready ")
+                {
+                    missing
                 } else if request.starts_with("GET /gateway/health ") {
                     b"HTTP/1.1 200 OK
 content-length: 2

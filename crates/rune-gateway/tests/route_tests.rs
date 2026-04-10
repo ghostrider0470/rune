@@ -1548,6 +1548,7 @@ fn build_test_app_parts_with_ms365_services(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_test_app_parts_with_ms365_services_and_session_repo(
     mut config: AppConfig,
     auth_token: Option<String>,
@@ -10795,6 +10796,7 @@ async fn get_session_tree_defaults_subagent_lifecycle_when_runtime_metadata_miss
     assert_eq!(child["subagent_runtime_attached"], false);
 }
 
+#[tokio::test]
 async fn create_subagent_session_accepts_delegation_context_and_scratchpad() {
     let app = build_test_app(None);
 
@@ -14849,8 +14851,10 @@ async fn ws_rpc_tools_get_returns_persisted_execution() {
 
 #[tokio::test]
 async fn doctor_route_reports_custom_path_profile_and_server_mode() {
-    let mut config = AppConfig::default();
-    config.mode = RuntimeMode::Server;
+    let mut config = AppConfig {
+        mode: RuntimeMode::Server,
+        ..AppConfig::default()
+    };
     let root = std::env::temp_dir().join(format!("rune-doctor-custom-{}", Uuid::now_v7()));
     config.paths.db_dir = root.join("db");
     config.paths.sessions_dir = root.join("sessions");
@@ -14996,9 +15000,9 @@ async fn protected_http_routes_reject_session_token_query_auth_for_non_webchat_r
 fn storage_path_checks_mark_root_owned_optional_server_paths_as_warns_during_standalone_first_run()
 {
     let root = tempfile::tempdir().unwrap();
-    let mut config = rune_config::AppConfig::default();
-    config.mode = rune_config::RuntimeMode::Standalone;
-    config.paths = rune_config::PathsConfig {
+    let mut config = rune_config::AppConfig {
+        mode: rune_config::RuntimeMode::Standalone,
+        paths: rune_config::PathsConfig {
         db_dir: root.path().join("db"),
         sessions_dir: root.path().join("sessions"),
         memory_dir: root.path().join("memory"),
@@ -15013,6 +15017,8 @@ fn storage_path_checks_mark_root_owned_optional_server_paths_as_warns_during_sta
         workspace_dir: root.path().join("workspace"),
         cache_dir: root.path().join("cache"),
         data_dir: root.path().join("data"),
+    },
+        ..rune_config::AppConfig::default()
     };
     config.ensure_dirs().unwrap();
     config.paths = rune_config::PathsConfig::default();
@@ -15386,8 +15392,10 @@ async fn delegation_plan_exposes_sender_capability_identity_metadata() {
 
 #[tokio::test]
 async fn doctor_run_reports_instance_topology_summary() {
-    let mut config = AppConfig::default();
-    config.mode = RuntimeMode::Server;
+    let mut config = AppConfig {
+        mode: RuntimeMode::Server,
+        ..AppConfig::default()
+    };
     config.database.backend = rune_config::StorageBackend::Postgres;
     config.database.database_url = Some("postgresql://localhost/rune".into());
     config.models.providers = vec![rune_config::ModelProviderConfig {

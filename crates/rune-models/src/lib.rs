@@ -408,7 +408,7 @@ impl RoutedModelProvider {
         self.record_provider_result(
             &resolved.provider.name,
             model_ref,
-            &result.as_ref().map(|_| ()).map_err(|err| err),
+            &result.as_ref().map(|_| ()),
         );
         result
     }
@@ -555,7 +555,7 @@ impl RoutedModelProvider {
         self.record_provider_result(
             &resolved.provider.name,
             model_ref,
-            &result.as_ref().map(|_| ()).map_err(|err| err),
+            &result.as_ref().map(|_| ()),
         );
         result
     }

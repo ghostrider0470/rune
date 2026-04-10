@@ -1026,6 +1026,7 @@ pub struct SkillStatusResponse {
 
 #[derive(Deserialize)]
 pub struct CommsSendRequest {
+    pub to: Option<String>,
     pub msg_type: String,
     pub subject: String,
     pub body: String,
@@ -1191,6 +1192,16 @@ pub async fn comms_send(
         .comms_client
         .clone()
         .ok_or_else(|| GatewayError::BadRequest("native comms is not enabled".to_string()))?;
+
+    let client = if let Some(to) = body.to.as_deref() {
+        Arc::new(rune_runtime::comms::CommsClient::with_transport(
+            client.transport().clone(),
+            client.agent_id().to_string(),
+            to.to_string(),
+        ))
+    } else {
+        client
+    };
 
     let id = client
         .send(&body.msg_type, &body.subject, &body.body, &body.priority)
@@ -3993,7 +4004,7 @@ pub(crate) fn session_next_task_reason(status: &str, metadata: &Value) -> String
     }
 }
 
-fn session_task_picking_reason(status: &str, metadata: &Value) -> Option<String> {
+fn session_task_picking_reason(_status: &str, metadata: &Value) -> Option<String> {
     if let Some(reason) = metadata_string(metadata, "next_task_reason") {
         return Some(reason);
     }
@@ -4020,10 +4031,7 @@ fn session_task_picking_reason(status: &str, metadata: &Value) -> Option<String>
     if parts.is_empty() {
         None
     } else {
-        Some(match status {
-            "running" => format!("{}", parts.join("; ")),
-            _ => format!("{}", parts.join("; ")),
-        })
+        Some(parts.join("; "))
     }
 }
 
@@ -5205,37 +5213,34 @@ pub async fn scan_models(
             provider_cfg.kind.as_str()
         };
 
-        match kind.to_lowercase().as_str() {
-            "ollama" => {
-                let provider = if provider_cfg.base_url.is_empty() {
-                    rune_models::OllamaProvider::new()
-                } else {
-                    rune_models::OllamaProvider::with_base_url(&provider_cfg.base_url)
-                };
-                let models = provider.list_models().await.map_err(|e| {
-                    GatewayError::Internal(format!(
-                        "failed to scan models for provider '{}': {e}",
-                        provider_cfg.name
-                    ))
-                })?;
+        if kind.eq_ignore_ascii_case("ollama") {
+            let provider = if provider_cfg.base_url.is_empty() {
+                rune_models::OllamaProvider::new()
+            } else {
+                rune_models::OllamaProvider::with_base_url(&provider_cfg.base_url)
+            };
+            let models = provider.list_models().await.map_err(|e| {
+                GatewayError::Internal(format!(
+                    "failed to scan models for provider '{}': {e}",
+                    provider_cfg.name
+                ))
+            })?;
 
-                results.push(ScanModelsResponse {
-                    provider: provider_cfg.name.clone(),
-                    models: models
-                        .into_iter()
-                        .map(|m| ScannedModel {
-                            name: m.name,
-                            size: if m.size > 0 { Some(m.size) } else { None },
-                            modified_at: if m.modified_at.is_empty() {
-                                None
-                            } else {
-                                Some(m.modified_at)
-                            },
-                        })
-                        .collect(),
-                });
-            }
-            _ => {}
+            results.push(ScanModelsResponse {
+                provider: provider_cfg.name.clone(),
+                models: models
+                    .into_iter()
+                    .map(|m| ScannedModel {
+                        name: m.name,
+                        size: if m.size > 0 { Some(m.size) } else { None },
+                        modified_at: if m.modified_at.is_empty() {
+                            None
+                        } else {
+                            Some(m.modified_at)
+                        },
+                    })
+                    .collect(),
+            });
         }
     }
 
