@@ -1,6 +1,6 @@
 # OpenClaw vs Rune — Parity Matrix
 
-_Generated 2026-03-20 from code audit of both codebases._
+_Generated 2026-03-20 from code audit of both codebases. Updated 2026-04-10 for replacement-readiness truth._
 
 ## Summary
 
@@ -147,7 +147,7 @@ _Generated 2026-03-20 from code audit of both codebases._
 | Sandbox (filesystem) | Yes | Yes |
 | Process audit trail | No | Yes |
 | First-use bypass warning | No | Yes |
-| Channel allowlists | Yes | Partial — provider/webhook authenticity checks exist where applicable, but no sender/user/chat allowlist policy surface yet (#898) |
+| Channel allowlists | Yes | Partial — provider/webhook authenticity checks exist where applicable, but no sender/user/chat allowlist policy surface yet; this remains a documented replacement-readiness blocker even though issue #898 is closed as a truth/documentation pass |
 | Role-based access | Basic | No |
 
 **Rune advantage:** Significantly more sophisticated approval system.
@@ -172,9 +172,9 @@ _Generated 2026-03-20 from code audit of both codebases._
 
 ## Critical Path: Rune as OpenClaw Replacement
 
-### Must-Have (blocks daily use):
-1. **web-fetch tool** — agents can't browse URLs or call APIs without it
-2. **git tool** — coding agents need git operations
+### Must-Have (historical gap list; not the canonical readiness verdict):
+1. **web-fetch tool** — historical note; shipped in the current Horizon execution environment, so do not use this row as the operator truth source
+2. **git tool** — historical note; shipped in the current Horizon execution environment, so do not use this row as the operator truth source
 3. **WebChat channel** — operator needs browser-based interaction
 4. **TLS/HTTPS** — production deployment requirement
 5. **Plugin execution engine** — extensibility is core to the product
@@ -206,4 +206,4 @@ For Rune to maintain its own code (self-coding agent):
 6. **Subagent orchestration** — already working (spawn coder agents)
 7. **Approval system** — already working (operator reviews before destructive ops)
 
-**Gap to self-maintenance: 2 tools (git + web-fetch).** Everything else is in place.
+**Historical note:** this self-maintenance summary is stale if read outside its original generation context. For current operator truth about replacement claims, use `docs/operator/REPLACEMENT-READINESS.md` and `docs/operator/HEALTH-AND-DOCTOR.md` instead of this matrix.

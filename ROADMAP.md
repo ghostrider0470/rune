@@ -1,15 +1,15 @@
 # Rune Roadmap — Execution Snapshot
 
-Last updated: 2026-04-07
+Last updated: 2026-04-10
 
 ## Status
 - Legacy roadmap retained below for provenance.
 - Canonical product strategy lives in `rune-plan.md`.
 - Canonical parity-phase sequencing lives in `docs/IMPLEMENTATION-PHASES.md`.
-- GitHub Project 2 is the live execution control plane.
+- GitHub issues/PRs are the live execution control plane.
 - Open replacement-readiness epic #893 and child issues #896, #898, #899 are closed.
 - There is no active roadmap lane under #893 now; remaining replacement-truth gates are tracked directly in shipped readiness docs and doctor/status surfaces.
-- Next execution should come from currently open GitHub issues / Project 2 priorities, not from the closed #893 lane.
+- If `gh issue list --state open` is empty, there is no active coding lane to resume from this roadmap snapshot.
 
 ---
 
