@@ -35,6 +35,8 @@ The Phase 25 specification in `docs/specs/phases-25-27.md` describes a larger fu
 
 Treat that Phase 25 document as the target design, not as proof of current parity.
 
+Implementation note (2026-04-11): roadmap/state bookkeeping was aligned so the Memory Bank row and roadmap status text explicitly point at the shipped `.rune/knowledge/` scaffold/list/get behavior rather than implying an untracked active execution lane.
+
 ## Contributor guidance
 
 When reasoning about current behavior, use the implementation in:

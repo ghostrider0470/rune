@@ -10,6 +10,7 @@ Last updated: 2026-04-10
 - Open replacement-readiness epic #893 and child issues #896, #898, #899 are closed.
 - There is no active roadmap lane under #893 now; remaining replacement-truth gates are tracked directly in shipped readiness docs and doctor/status surfaces.
 - If `gh issue list --state open` is empty, there is no active coding lane to resume from this roadmap snapshot.
+- The remaining Memory Bank follow-up is documentation/API/spec hygiene rather than an active coding lane unless a new GitHub issue is opened.
 
 ---
 
@@ -100,7 +101,7 @@ Context: Full rewrite of OpenClaw's architecture in Rust + comprehensive admin U
 | Agent Modes | ⚠️ 2026-03-29 | Project orchestrator routing/registry, persisted orchestrator state, merge queue, and delegated subagent context handoff are shipped; named specialist modes and mode APIs still need follow-up |
 | Git Worktree Isolation | ⚠️ 2026-03-29 | Orchestrator state already tracks branch/worktree paths and merge queue metadata, but automated worktree lifecycle management and executor/tool scoping are still missing |
 | Context Compression | ⚠️ 2026-03-29 | Context tier budgeting, compaction diagnostics, checkpoint metadata, and delegated context handoff for subagents are shipped; transcript summarization/checkpoint persistence still need follow-up |
-| Memory Bank | ⚠️ 2026-04-08 | `.rune/knowledge/` scaffold + prompt injection are shipped via `MemoryBankLoader`; full Phase 25 API/tooling, staleness checks, and onboarding briefing remain follow-up work |
+| Memory Bank | ⚠️ 2026-04-11 | `.rune/knowledge/` scaffold + prompt injection are shipped via `MemoryBankLoader`, and the current-state docs now explicitly describe shipped `.rune/knowledge/` list/get behavior; full Phase 25 API/tooling, staleness checks, and onboarding briefing remain follow-up work |
 | Extended Channels | ❌ Missing | No LINE/Mattermost/Matrix/Feishu/iMessage — OpenClaw breadth |
 | Calendar/Email | ✅ 2026-03-26 | Microsoft 365 calendar, mail, files, users, Planner, and To-Do routes/services landed in gateway with auth and integration coverage |
 
