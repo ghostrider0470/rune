@@ -459,7 +459,16 @@ impl MemoryToolExecutor {
         }
 
         let output = if files.is_empty() {
-            "No Memory Bank documents found.".to_string()
+            if let Some(scope) = scope {
+                let scope = scope.trim_matches('/');
+                if scope.is_empty() {
+                    "No Memory Bank documents found.".to_string()
+                } else {
+                    format!("No Memory Bank documents found under .rune/knowledge/{scope}.")
+                }
+            } else {
+                "No Memory Bank documents found.".to_string()
+            }
         } else {
             files
                 .into_iter()
@@ -1183,6 +1192,26 @@ mod tests {
 
         assert!(result.output.contains(".rune/knowledge/adr/ADR-0001.md"));
         assert!(!result.output.contains(".rune/knowledge/conventions/RULES.md"));
+    }
+
+    #[tokio::test]
+    async fn memory_bank_list_reports_scoped_empty_result() {
+        let tmp = TempDir::new().unwrap();
+        tokio::fs::create_dir_all(tmp.path().join(".rune/knowledge/adr"))
+            .await
+            .unwrap();
+        tokio::fs::write(tmp.path().join(".rune/knowledge/adr/ADR-0001.md"), "# ADR")
+            .await
+            .unwrap();
+
+        let executor = MemoryToolExecutor::new(tmp.path());
+        let call = make_call("memory_bank_list", serde_json::json!({"path": "conventions"}));
+        let result = executor.execute(call).await.unwrap();
+
+        assert_eq!(
+            result.output,
+            "No Memory Bank documents found under .rune/knowledge/conventions."
+        );
     }
 
     #[tokio::test]
