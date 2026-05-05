@@ -108,6 +108,11 @@ impl AppConfig {
         out.channels.teams_app_password = mask(&self.channels.teams_app_password);
         out.mem0.embedding_api_key = mask(&self.mem0.embedding_api_key);
         out.mem0.postgres_url = mask(&self.mem0.postgres_url);
+        for server in &mut out.mcp_servers {
+            for value in server.http_headers.values_mut() {
+                *value = "***".to_string();
+            }
+        }
         out
     }
 
@@ -1249,6 +1254,10 @@ pub struct McpServerConfig {
     pub cwd: Option<String>,
     #[serde(default)]
     pub url: Option<String>,
+    #[serde(default)]
+    pub http_headers: HashMap<String, String>,
+    #[serde(default)]
+    pub http_headers_env: HashMap<String, String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
 }
@@ -3040,10 +3049,16 @@ enabled = true
 name = "remote"
 transport = "http"
 url = "http://127.0.0.1:8788/mcp"
+http_headers = { Authorization = "Bearer inline-token" }
+http_headers_env = { X_API_KEY = "RUNE_TEST_MCP_KEY" }
 enabled = false
 "#,
         )
         .unwrap();
+
+        unsafe {
+            std::env::set_var("RUNE_TEST_MCP_KEY", "env-token");
+        }
 
         let config = AppConfig::load(Some(&path)).unwrap();
         assert_eq!(config.mcp_servers.len(), 2);
@@ -3057,8 +3072,25 @@ enabled = false
             config.mcp_servers[1].url.as_deref(),
             Some("http://127.0.0.1:8788/mcp")
         );
+        assert_eq!(
+            config.mcp_servers[1]
+                .http_headers
+                .get("Authorization")
+                .map(String::as_str),
+            Some("Bearer inline-token")
+        );
+        assert_eq!(
+            config.mcp_servers[1]
+                .http_headers_env
+                .get("X_API_KEY")
+                .map(String::as_str),
+            Some("RUNE_TEST_MCP_KEY")
+        );
         assert!(!config.mcp_servers[1].enabled);
 
+        unsafe {
+            std::env::remove_var("RUNE_TEST_MCP_KEY");
+        }
         let _ = fs::remove_file(path);
     }
 

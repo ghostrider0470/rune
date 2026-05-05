@@ -3,10 +3,12 @@
 //! Sends JSON-RPC requests as HTTP POST and optionally connects to an SSE
 //! endpoint for server-initiated events.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use reqwest::Client;
+use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use tracing::debug;
 
 use crate::error::McpError;
@@ -22,8 +24,24 @@ pub struct HttpTransport {
     url: String,
     /// Shared HTTP client (connection pooling, TLS config, etc.).
     client: Client,
+    /// Headers applied to every request.
+    headers: HeaderMap,
     /// Monotonically increasing request id counter.
     next_id: Arc<AtomicU64>,
+}
+
+fn build_headers(headers: HashMap<String, String>) -> Result<HeaderMap, McpError> {
+    let mut header_map = HeaderMap::new();
+    for (name, value) in headers {
+        let header_name = HeaderName::from_bytes(name.as_bytes()).map_err(|e| {
+            McpError::init_failed(format!("invalid HTTP header name '{name}': {e}"))
+        })?;
+        let header_value = HeaderValue::from_str(&value).map_err(|e| {
+            McpError::init_failed(format!("invalid HTTP header value for '{name}': {e}"))
+        })?;
+        header_map.insert(header_name, header_value);
+    }
+    Ok(header_map)
 }
 
 impl HttpTransport {
@@ -32,18 +50,23 @@ impl HttpTransport {
     /// This constructor validates reachability by default but does **not**
     /// perform the MCP `initialize` handshake -- that is the caller's
     /// responsibility.
-    pub async fn connect(url: impl Into<String>) -> Result<Self, McpError> {
+    pub async fn connect(
+        url: impl Into<String>,
+        headers: HashMap<String, String>,
+    ) -> Result<Self, McpError> {
         let url = url.into();
+        let headers = build_headers(headers)?;
 
         let client = Client::builder()
             .build()
             .map_err(|e| McpError::transport(format!("failed to build HTTP client: {e}")))?;
 
-        debug!(url = %url, "HTTP transport created");
+        debug!(url = %url, header_count = headers.len(), "HTTP transport created");
 
         Ok(Self {
             url,
             client,
+            headers,
             next_id: Arc::new(AtomicU64::new(1)),
         })
     }
@@ -62,8 +85,9 @@ impl HttpTransport {
         let resp = self
             .client
             .post(&self.url)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json, text/event-stream")
+            .headers(self.headers.clone())
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json, text/event-stream")
             .json(&request)
             .send()
             .await
@@ -146,7 +170,8 @@ impl HttpTransport {
         let resp = self
             .client
             .post(&self.url)
-            .header("Content-Type", "application/json")
+            .headers(self.headers.clone())
+            .header(CONTENT_TYPE, "application/json")
             .json(&serde_json::json!({
                 "jsonrpc": "2.0",
                 "method": method,
@@ -179,10 +204,12 @@ impl HttpTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{body_partial_json, header, method};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn connect_builds_transport() {
-        let transport = HttpTransport::connect("http://localhost:9999").await;
+        let transport = HttpTransport::connect("http://localhost:9999", HashMap::new()).await;
         assert!(transport.is_ok());
         let t = transport.unwrap();
         assert_eq!(t.url(), "http://localhost:9999");
@@ -190,11 +217,67 @@ mod tests {
 
     #[tokio::test]
     async fn next_id_increments() {
-        let t = HttpTransport::connect("http://localhost:9999")
+        let t = HttpTransport::connect("http://localhost:9999", HashMap::new())
             .await
             .unwrap();
         let a = t.next_request_id();
         let b = t.next_request_id();
         assert_eq!(b, a + 1);
+    }
+
+    #[tokio::test]
+    async fn connect_rejects_invalid_header_name() {
+        let result = HttpTransport::connect(
+            "http://localhost:9999",
+            HashMap::from([("Bad Header".into(), "value".into())]),
+        )
+        .await;
+        match result {
+            Ok(_) => panic!("invalid header name should fail"),
+            Err(err) => assert!(err.to_string().contains("invalid HTTP header name")),
+        }
+    }
+
+    #[tokio::test]
+    async fn send_includes_configured_headers() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(header("authorization", "Bearer secret-token"))
+            .and(header("x-api-key", "extra-secret"))
+            .and(body_partial_json(
+                serde_json::json!({"method":"initialize"}),
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc":"2.0",
+                "id":1,
+                "result": {
+                    "protocolVersion":"2024-11-05",
+                    "capabilities": {},
+                    "serverInfo": {"name":"mock-mcp","version":"1.0.0"}
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let transport = HttpTransport::connect(
+            server.uri(),
+            HashMap::from([
+                ("Authorization".into(), "Bearer secret-token".into()),
+                ("X-API-Key".into(), "extra-secret".into()),
+            ]),
+        )
+        .await
+        .unwrap();
+
+        let response = transport
+            .send(JsonRpcRequest::new(
+                1,
+                "initialize",
+                Some(serde_json::json!({})),
+            ))
+            .await
+            .unwrap();
+        assert!(response.error.is_none());
+        assert!(response.result.is_some());
     }
 }

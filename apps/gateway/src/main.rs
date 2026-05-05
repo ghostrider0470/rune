@@ -1007,6 +1007,8 @@ async fn build_mcp_tool_executor(
             env: srv.env.clone(),
             cwd: None,
             url: srv.url.clone(),
+            http_headers: srv.http_headers.clone(),
+            http_headers_env: srv.http_headers_env.clone(),
             enabled: true,
         });
     }
@@ -1085,6 +1087,8 @@ fn runtime_mcp_config(
         env: server.env.clone(),
         cwd,
         url: server.url.clone(),
+        http_headers: server.http_headers.clone(),
+        http_headers_env: server.http_headers_env.clone(),
         enabled: server.enabled,
     }
 }

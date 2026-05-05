@@ -97,6 +97,10 @@ pub struct ClaudeMcpServer {
     #[serde(default)]
     pub env: HashMap<String, String>,
     pub url: Option<String>,
+    #[serde(default)]
+    pub http_headers: HashMap<String, String>,
+    #[serde(default)]
+    pub http_headers_env: HashMap<String, String>,
 }
 
 /// The fully-parsed representation of a Claude Code plugin directory.
@@ -169,6 +173,10 @@ struct McpServerEntry {
     env: HashMap<String, String>,
     #[serde(default)]
     url: Option<String>,
+    #[serde(default, alias = "headers")]
+    http_headers: HashMap<String, String>,
+    #[serde(default, alias = "headersEnv")]
+    http_headers_env: HashMap<String, String>,
 }
 
 fn default_transport() -> String {
@@ -425,6 +433,8 @@ async fn parse_mcp_file(path: &Path, plugin_name: &str) -> Vec<ClaudeMcpServer> 
                 args: entry.args,
                 env: entry.env,
                 url: entry.url,
+                http_headers: entry.http_headers,
+                http_headers_env: entry.http_headers_env,
             })
             .collect();
     }
@@ -441,6 +451,8 @@ async fn parse_mcp_file(path: &Path, plugin_name: &str) -> Vec<ClaudeMcpServer> 
                 args: entry.args,
                 env: entry.env,
                 url: entry.url,
+                http_headers: entry.http_headers,
+                http_headers_env: entry.http_headers_env,
             })
             .collect();
     }
@@ -976,7 +988,9 @@ mod tests {
       "transport": "stdio",
       "command": "npx",
       "args": ["-y", "@upstash/context7-mcp@latest"],
-      "env": {"NODE_ENV": "production"}
+      "env": {"NODE_ENV": "production"},
+      "headers": {"Authorization": "Bearer plugin-token"},
+      "headersEnv": {"X-API-Key": "PLUGIN_MCP_KEY"}
     }
   }
 }"#,
@@ -994,6 +1008,14 @@ mod tests {
         assert_eq!(
             s.env.get("NODE_ENV").map(|s| s.as_str()),
             Some("production")
+        );
+        assert_eq!(
+            s.http_headers.get("Authorization").map(|s| s.as_str()),
+            Some("Bearer plugin-token")
+        );
+        assert_eq!(
+            s.http_headers_env.get("X-API-Key").map(|s| s.as_str()),
+            Some("PLUGIN_MCP_KEY")
         );
     }
 }

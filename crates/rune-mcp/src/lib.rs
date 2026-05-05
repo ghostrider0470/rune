@@ -150,7 +150,8 @@ impl McpManager {
             }
             McpTransportKind::Http => {
                 let url = cfg.url.as_deref().unwrap_or_default();
-                let t = HttpTransport::connect(url).await?;
+                let headers = cfg.resolved_http_headers()?;
+                let t = HttpTransport::connect(url, headers).await?;
                 TransportHandle::Http(t)
             }
         };
@@ -550,6 +551,8 @@ for line in sys.stdin:
                 env: HashMap::new(),
                 cwd: None,
                 url: None,
+                http_headers: HashMap::new(),
+                http_headers_env: HashMap::new(),
                 enabled: true,
             }])
             .await
@@ -589,6 +592,8 @@ for line in sys.stdin:
                 env: HashMap::new(),
                 cwd: None,
                 url: None,
+                http_headers: HashMap::new(),
+                http_headers_env: HashMap::new(),
                 enabled: true,
             }])
             .await

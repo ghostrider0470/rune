@@ -7,6 +7,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::McpError;
+
 /// Transport mechanism for reaching an MCP server.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -46,6 +48,14 @@ pub struct McpServerConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 
+    /// Static HTTP headers sent with every request.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub http_headers: HashMap<String, String>,
+
+    /// Header -> env-var map resolved at runtime for secrets.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub http_headers_env: HashMap<String, String>,
+
     /// Whether this server is enabled.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
@@ -78,6 +88,20 @@ impl McpServerConfig {
         }
         Ok(())
     }
+
+    pub fn resolved_http_headers(&self) -> Result<HashMap<String, String>, McpError> {
+        let mut headers = self.http_headers.clone();
+        for (header_name, env_name) in &self.http_headers_env {
+            let value = std::env::var(env_name).map_err(|_| {
+                McpError::init_failed(format!(
+                    "server '{}': missing env var '{}' for HTTP header '{}'",
+                    self.name, env_name, header_name
+                ))
+            })?;
+            headers.insert(header_name.clone(), value);
+        }
+        Ok(headers)
+    }
 }
 
 #[cfg(test)]
@@ -94,6 +118,8 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             url: None,
+            http_headers: HashMap::new(),
+            http_headers_env: HashMap::new(),
             enabled: true,
         };
         assert!(cfg.validate().is_ok());
@@ -109,6 +135,8 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             url: None,
+            http_headers: HashMap::new(),
+            http_headers_env: HashMap::new(),
             enabled: true,
         };
         assert!(cfg.validate().is_err());
@@ -124,6 +152,8 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             url: Some("http://localhost:3001".into()),
+            http_headers: HashMap::new(),
+            http_headers_env: HashMap::new(),
             enabled: true,
         };
         assert!(cfg.validate().is_ok());
@@ -139,9 +169,66 @@ mod tests {
             env: HashMap::new(),
             cwd: None,
             url: None,
+            http_headers: HashMap::new(),
+            http_headers_env: HashMap::new(),
             enabled: true,
         };
         assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn resolved_http_headers_merge_inline_and_env() {
+        let cfg = McpServerConfig {
+            name: "remote".into(),
+            transport: McpTransportKind::Http,
+            command: None,
+            args: None,
+            env: HashMap::new(),
+            cwd: None,
+            url: Some("http://localhost:3001".into()),
+            http_headers: HashMap::from([("Authorization".into(), "Bearer inline".into())]),
+            http_headers_env: HashMap::from([("X-API-Key".into(), "RUNE_TEST_MCP_HEADER".into())]),
+            enabled: true,
+        };
+        unsafe {
+            std::env::set_var("RUNE_TEST_MCP_HEADER", "secret-from-env");
+        }
+        let headers = cfg.resolved_http_headers().unwrap();
+        assert_eq!(
+            headers.get("Authorization").map(String::as_str),
+            Some("Bearer inline")
+        );
+        assert_eq!(
+            headers.get("X-API-Key").map(String::as_str),
+            Some("secret-from-env")
+        );
+        unsafe {
+            std::env::remove_var("RUNE_TEST_MCP_HEADER");
+        }
+    }
+
+    #[test]
+    fn resolved_http_headers_errors_when_env_missing() {
+        let cfg = McpServerConfig {
+            name: "remote".into(),
+            transport: McpTransportKind::Http,
+            command: None,
+            args: None,
+            env: HashMap::new(),
+            cwd: None,
+            url: Some("http://localhost:3001".into()),
+            http_headers: HashMap::new(),
+            http_headers_env: HashMap::from([(
+                "Authorization".into(),
+                "RUNE_TEST_MISSING_MCP_HEADER".into(),
+            )]),
+            enabled: true,
+        };
+        unsafe {
+            std::env::remove_var("RUNE_TEST_MISSING_MCP_HEADER");
+        }
+        let err = cfg.resolved_http_headers().unwrap_err();
+        assert!(err.to_string().contains("RUNE_TEST_MISSING_MCP_HEADER"));
     }
 
     #[test]
@@ -162,6 +249,8 @@ mod tests {
             env: HashMap::from([("API_KEY".into(), "secret".into())]),
             cwd: None,
             url: Some("http://localhost:8080".into()),
+            http_headers: HashMap::from([("Authorization".into(), "Bearer token".into())]),
+            http_headers_env: HashMap::from([("X-API-Key".into(), "MCP_API_KEY".into())]),
             enabled: false,
         };
         let json = serde_json::to_string(&cfg).unwrap();
