@@ -126,6 +126,16 @@ global_tool_capacity = 32
 # Max concurrent tool executions per project lane
 project_tool_capacity = 4
 
+
+[[mcp_servers]]
+name = "github-remote"
+transport = "http"
+url = "https://example.com/mcp"
+# Inline headers are supported, but prefer env-backed secrets for auth.
+# http_headers = { X-Client = "rune" }
+http_headers_env = { Authorization = "GITHUB_MCP_AUTH_HEADER" }
+# Example env value: export GITHUB_MCP_AUTH_HEADER='Bearer ghp_xxx'
+
 [logging]
 level = "info"
 json = true
