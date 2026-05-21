@@ -2891,10 +2891,20 @@ pub async fn get_session_status(
             "subagent runtime execution remains conservative; durable lifecycle inspection is available but full remote/runtime attachment parity is not complete".to_string(),
         );
     }
-    unresolved.extend(canonical_replacement_readiness_blockers().into_iter().map(|blocker| match blocker.issue {
-        Some(issue) => format!("replacement readiness [{}:{}]: {}", blocker.category, issue, blocker.detail),
-        None => format!("replacement readiness [{}]: {}", blocker.category, blocker.detail),
-    }));
+    unresolved.extend(
+        canonical_replacement_readiness_blockers()
+            .into_iter()
+            .map(|blocker| match blocker.issue {
+                Some(issue) => format!(
+                    "replacement readiness [{}:{}]: {}",
+                    blocker.category, issue, blocker.detail
+                ),
+                None => format!(
+                    "replacement readiness [{}]: {}",
+                    blocker.category, blocker.detail
+                ),
+            }),
+    );
 
     Ok(Json(SessionStatusResponse {
         session_id: row.id.to_string(),

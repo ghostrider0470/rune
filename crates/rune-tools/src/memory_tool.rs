@@ -1152,9 +1152,12 @@ mod tests {
         tokio::fs::create_dir_all(tmp.path().join(".rune/knowledge/adr"))
             .await
             .unwrap();
-        tokio::fs::write(tmp.path().join(".rune/knowledge/README.md"), "# Memory Bank")
-            .await
-            .unwrap();
+        tokio::fs::write(
+            tmp.path().join(".rune/knowledge/README.md"),
+            "# Memory Bank",
+        )
+        .await
+        .unwrap();
         tokio::fs::write(tmp.path().join(".rune/knowledge/adr/ADR-0001.md"), "# ADR")
             .await
             .unwrap();
@@ -1191,7 +1194,11 @@ mod tests {
         let result = exec.execute(call).await.unwrap();
 
         assert!(result.output.contains(".rune/knowledge/adr/ADR-0001.md"));
-        assert!(!result.output.contains(".rune/knowledge/conventions/RULES.md"));
+        assert!(
+            !result
+                .output
+                .contains(".rune/knowledge/conventions/RULES.md")
+        );
     }
 
     #[tokio::test]
@@ -1205,7 +1212,10 @@ mod tests {
             .unwrap();
 
         let executor = MemoryToolExecutor::new(tmp.path());
-        let call = make_call("memory_bank_list", serde_json::json!({"path": "conventions"}));
+        let call = make_call(
+            "memory_bank_list",
+            serde_json::json!({"path": "conventions"}),
+        );
         let result = executor.execute(call).await.unwrap();
 
         assert_eq!(

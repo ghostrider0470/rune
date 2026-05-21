@@ -13873,13 +13873,16 @@ async fn doctor_run_surfaces_readiness_slos_and_pending_evidence_status() {
     let blockers = body["replacement_readiness"]["blockers"]
         .as_array()
         .unwrap();
-    assert!(blockers.iter().any(|blocker| {
-        blocker["category"] == "operational"
-            && blocker["status"] == "blocked"
-    }));
-    assert!(blockers.iter().any(|blocker| {
-        blocker["category"] == "product-surface"
-    }));
+    assert!(
+        blockers.iter().any(|blocker| {
+            blocker["category"] == "operational" && blocker["status"] == "blocked"
+        })
+    );
+    assert!(
+        blockers
+            .iter()
+            .any(|blocker| { blocker["category"] == "product-surface" })
+    );
     assert!(blockers.iter().any(|blocker| {
         blocker["category"] == "runtime-resilience"
             && blocker["detail"]
@@ -13911,7 +13914,8 @@ async fn doctor_run_surfaces_readiness_slos_and_pending_evidence_status() {
 async fn session_status_unresolved_reuses_replacement_readiness_blockers() {
     let app = build_test_app(None);
 
-    let response = app.clone()
+    let response = app
+        .clone()
         .oneshot(
             Request::post("/sessions")
                 .header(header::CONTENT_TYPE, "application/json")
@@ -15003,21 +15007,21 @@ fn storage_path_checks_mark_root_owned_optional_server_paths_as_warns_during_sta
     let mut config = rune_config::AppConfig {
         mode: rune_config::RuntimeMode::Standalone,
         paths: rune_config::PathsConfig {
-        db_dir: root.path().join("db"),
-        sessions_dir: root.path().join("sessions"),
-        memory_dir: root.path().join("memory"),
-        media_dir: root.path().join("media"),
-        spells_dir: std::path::PathBuf::from("/proc"),
-        skills_dir: std::path::PathBuf::from("/proc"),
-        plugins_dir: std::path::PathBuf::from("/sys"),
-        logs_dir: root.path().join("logs"),
-        backups_dir: std::path::PathBuf::from("/etc"),
-        config_dir: std::path::PathBuf::from("/bin"),
-        secrets_dir: std::path::PathBuf::from("/sbin"),
-        workspace_dir: root.path().join("workspace"),
-        cache_dir: root.path().join("cache"),
-        data_dir: root.path().join("data"),
-    },
+            db_dir: root.path().join("db"),
+            sessions_dir: root.path().join("sessions"),
+            memory_dir: root.path().join("memory"),
+            media_dir: root.path().join("media"),
+            spells_dir: std::path::PathBuf::from("/proc"),
+            skills_dir: std::path::PathBuf::from("/proc"),
+            plugins_dir: std::path::PathBuf::from("/sys"),
+            logs_dir: root.path().join("logs"),
+            backups_dir: std::path::PathBuf::from("/etc"),
+            config_dir: std::path::PathBuf::from("/bin"),
+            secrets_dir: std::path::PathBuf::from("/sbin"),
+            workspace_dir: root.path().join("workspace"),
+            cache_dir: root.path().join("cache"),
+            data_dir: root.path().join("data"),
+        },
         ..rune_config::AppConfig::default()
     };
     config.ensure_dirs().unwrap();
@@ -16958,7 +16962,10 @@ async fn get_session_tree_exposes_descendant_audit_on_nested_subagents() {
     assert_eq!(json["audit"]["active_descendants"], 0);
     assert_eq!(json["audit"]["waiting_descendants"], 0);
     assert_eq!(json["audit"]["blocked_descendants"], 0);
-    assert_eq!(json["audit"]["last_descendant_result_at"], "2026-03-30T10:15:00+00:00");
+    assert_eq!(
+        json["audit"]["last_descendant_result_at"],
+        "2026-03-30T10:15:00+00:00"
+    );
     assert_eq!(
         json["audit"]["last_descendant_result_excerpt"],
         "Grandchild delivered the final delegated audit summary for the nested subagent view."

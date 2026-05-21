@@ -59,7 +59,7 @@ pub use executor::{TurnExecutor, clear_session_abort, request_session_abort};
 pub use hooks::{HookEvent, HookHandler, HookRegistrationRecord, HookRegistry};
 pub use lane_queue::{Lane, LanePermit, LaneQueue, LaneStats, ProjectToolStats, ToolPermit};
 pub use mem0::Mem0Engine;
-pub use memory_bank::{MemoryBankContext, MemoryBankLoader, MEMORY_BANK_DIR};
+pub use memory_bank::{MEMORY_BANK_DIR, MemoryBankContext, MemoryBankLoader};
 pub use plugin::{PluginLoader, PluginManifest, PluginRegistry, PluginScanSummary};
 pub use plugin_manager::PluginManager;
 pub use plugin_scanner::{PluginScanner, UnifiedScanSummary};

@@ -16,9 +16,9 @@ use rune_tools::{ToolCall, ToolExecutor};
 use crate::a2ui::{A2uiActionParams, A2uiEvent, A2uiFormSubmitParams, broadcast_a2ui_event};
 use crate::events::{RuntimeEvent, TurnEvent, UsageSummary, broadcast_runtime_event};
 use crate::routes::{session_next_task_reason, session_resume_hint, session_status_reason};
-use rune_store::models::TurnRow;
 use crate::state::AppState;
 use crate::ws::active_ws_connections;
+use rune_store::models::TurnRow;
 
 // ── Error type ───────────────────────────────────────────────────────────────
 

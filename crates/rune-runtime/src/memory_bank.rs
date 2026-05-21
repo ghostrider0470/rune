@@ -212,7 +212,9 @@ mod tests {
         let root = loader.knowledge_root();
         tokio::fs::create_dir_all(&root).await.unwrap();
         let architecture = root.join(ARCHITECTURE_FILE);
-        tokio::fs::write(&architecture, "custom architecture").await.unwrap();
+        tokio::fs::write(&architecture, "custom architecture")
+            .await
+            .unwrap();
 
         loader.ensure_seeded().await.unwrap();
 
@@ -245,8 +247,10 @@ mod tests {
     #[test]
     fn knowledge_root_uses_workspace_relative_directory() {
         let loader = MemoryBankLoader::new(Path::new("/tmp/workspace"));
-        assert!(loader
-            .knowledge_root()
-            .ends_with(Path::new(".rune/knowledge")));
+        assert!(
+            loader
+                .knowledge_root()
+                .ends_with(Path::new(".rune/knowledge"))
+        );
     }
 }
